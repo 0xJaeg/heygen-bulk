@@ -1,0 +1,15 @@
+node_modules
+dist
+
+# secrets
+.env
+.env.local
+.env.*.local
+
+# runtime artifacts
+outputs
+.cache
+.data
+*.log
+
+.DS_Store

@@ -1,0 +1,43 @@
+{
+  "name": "@unearth/promo-video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "promo-video": "./dist/cli.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "status": "tsx src/cli.ts status",
+    "list-pool": "tsx src/cli.ts list-pool",
+    "gen:dry": "tsx src/cli.ts dry-run",
+    "gen:sample": "tsx src/cli.ts sample",
+    "gen:production": "tsx src/cli.ts production",
+    "resume": "tsx src/cli.ts resume"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
+    "commander": "^12.0.0",
+    "csv-parse": "^5.0.0",
+    "dotenv-flow": "^4.1.0",
+    "p-limit": "^6.0.0",
+    "pino": "^9.0.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^25.1.0",
+    "eslint": "^9.39.2",
+    "globals": "^15.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.1.7"
+  },
+  "engines": { "node": ">=20" }
+}

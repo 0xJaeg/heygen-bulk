@@ -1,0 +1,10 @@
+product_name,description,key_benefits,price,target_audience,tone,call_to_action,engine,orientation,num_variations,skip
+LeanGreens Superfood,A daily greens powder that boosts energy and digestion.,30+ superfoods; supports gut health; tastes great,$49,health-conscious adults 30-55,energetic,Try LeanGreens risk-free at leangreens.com,v2,portrait,1,false
+Manifest Money Meditation,A 21-day audio program to rewire your money mindset.,Daily 10-minute sessions; backed by neuroscience; lifetime access,$37,self-improvement seekers,friendly,Download your first session free,v2,portrait,2,false
+KetoFast Recipe Vault,A digital cookbook with 250 fast keto recipes.,250 recipes; under 30 minutes each; weekly meal plans,$27,busy keto dieters,energetic,Get instant access at ketofast.io,v2,portrait,1,false
+SolarDIY Blueprint,A step-by-step guide to building a home solar system.,Cut power bills; beginner-friendly plans; full parts list,$67,homeowners cutting energy costs,professional,Start saving at solardiy.com,v3,landscape,1,false
+PupGenius Training,An online course that trains any dog in 14 days.,Stops barking and chewing; bite-size video lessons; expert support,$59,new dog owners,friendly,Enroll your pup today,v2,portrait,1,false
+TradeSpark Signals,Real-time alerts that flag high-probability trades.,Daily signals; built-in risk controls; works on any broker,$97/mo,active retail traders,professional,Claim your 7-day trial at tradespark.io,v3,landscape,1,false
+GlowSkin Serum,A vitamin-C serum that visibly brightens skin in two weeks.,Brighter skin fast; lightweight formula; cruelty-free,$29,skincare fans aged 25-45,luxury,Shop GlowSkin today,v2,portrait,2,false
+DebtFree Roadmap,A coaching program that erases debt without budgeting stress.,Custom payoff plan; weekly coaching; proven framework,$129,people overwhelmed by debt,friendly,Book your free strategy call,v2,portrait,1,false
+RetiredOldOffer,An expired promotion no longer in rotation.,n/a,,,,Do not promote,,,1,true
