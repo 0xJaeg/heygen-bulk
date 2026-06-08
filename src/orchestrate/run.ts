@@ -61,6 +61,7 @@ export async function runPipeline(
   const scriptByJob = new Map<string, PromoScript>()
   const specByJob = new Map<string, JobSpec>()
   const buildFailures: PipelineResult["buildFailures"] = []
+  const seenJobIds = new Set<string>()
 
   for (const row of rows) {
     // A provided script is used verbatim — no Claude, no auto-variations.
@@ -107,6 +108,18 @@ export async function runPipeline(
         })
         continue
       }
+      // Guard against two rows resolving to the same job (e.g. duplicate
+      // product_name with no row_id) — otherwise they'd silently collapse to one.
+      if (seenJobIds.has(built.spec.jobId)) {
+        buildFailures.push({
+          productId: built.spec.productId,
+          variationIndex: built.spec.variationIndex,
+          reason:
+            "duplicate id — another row resolves to the same job; give each row a unique row_id (or product_name)",
+        })
+        continue
+      }
+      seenJobIds.add(built.spec.jobId)
       specs.push(built.spec)
       scriptByJob.set(built.spec.jobId, script)
       specByJob.set(built.spec.jobId, built.spec)

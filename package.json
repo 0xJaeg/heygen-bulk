@@ -11,6 +11,7 @@
     "format": "prettier --write \"**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "start": "tsx src/cli.ts start",
     "check": "tsx src/cli.ts status",
     "pool": "tsx src/cli.ts list-pool",
     "preview": "tsx src/cli.ts dry-run --source data/products.csv",

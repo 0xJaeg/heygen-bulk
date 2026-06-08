@@ -1,19 +1,19 @@
 # Operator Guide — Making Promo Videos
 
 For the person creating the videos. **No coding needed** — you edit a spreadsheet and
-run a few simple commands in the Terminal.
+run one command.
 
 ---
 
 ## One-time setup (a developer does this once)
 
-1. Install **Node.js 20+** and **ffmpeg** (`brew install node ffmpeg` on a Mac).
+1. Install **Node.js 20+** (`brew install node` on a Mac).
 2. In this project folder, run `npm install`.
 3. Copy `.env.example` to `.env.local` and paste the two API keys
    (`ANTHROPIC_API_KEY`, `HEYGEN_API_KEY`).
 4. Confirm it works: `npm run check` — it prints the effective config.
 
-After that, your day-to-day is just the steps below.
+After that, your day-to-day is just the two steps below.
 
 ---
 
@@ -28,51 +28,47 @@ product:
 
 | Column | What to put |
 |---|---|
-| `product_name` | The product name (required) |
+| `row_id` | A short **unique** id for each row (e.g. `heart`, `open`, `love`). Required whenever rows share a `product_name`. |
+| `product_name` | The product/offer name (can repeat across rows if `row_id` is unique) |
+| `script` | The exact words the avatar speaks — **keep under ~140 words (≈60s)** |
 | `gender` | `male` or `female` — picks a matching presenter |
-| `script` | The exact words the avatar speaks (keep under ~140 words ≈ 60s) |
 | `orientation` | Leave as `portrait` (TikTok / Reels / Shorts) |
+
+⚠️ **Every row needs its own `row_id`.** If two rows share a `product_name` and have no
+`row_id`, the tool treats them as the same video and only makes one. (You'll see a
+"duplicate id" message if that happens.)
 
 Save it — keep the format as **CSV**.
 
-### 2. Preview — free, no videos made
+### 2. Generate
 ```
-npm run preview
+npm start
 ```
-Shows each script and the estimated cost. **No money spent.** Fix the sheet if needed.
+It reads your sheet, then shows something like:
 
-### 3. Make a few samples to review
-```
-npm run sample
-```
-Makes the first 3 videos, then prints a line like
-`Review the sample: open outputs/2026-…__SAMPLE/index.html`.
-Open that file in your browser to watch them.
+> `Ready to generate 12 videos (avatar_v, 1080p) — est. cost ≈ $32.00.`
+> `Generate 12 videos for ~$32.00? (y/n)`
 
-### 4. Happy? Approve, then make them all
-The sample run prints the **exact two commands** to run next — copy/paste them:
-```
-npm run approve -- 2026-…        ← the run id it showed you
-npm run make
-```
-`npm run make` generates a video for **every** product in the sheet. Finished videos
-land in the newest folder under `outputs/` (open its `index.html` to watch).
+- Type **`y`** and press Enter → it makes every video and prints a link
+  (`Done. Watch them: open outputs/…/index.html`). Open that file to watch them.
+- Type **`n`** → nothing is made, no charge.
+
+That’s it. (Want to see the scripts + cost **without** making anything? Run
+`npm run preview`.)
 
 ---
 
 ## Costs (no surprises)
-- Roughly **$1 per minute** of video — a 30-second video ≈ **$0.50**.
-- `npm run preview` always shows the estimate first and never spends.
-- Large batches ask you to confirm before spending.
+- About **$2–$4 per video** (Avatar V is ~$4 per minute, and clips are under a minute).
+- `npm start` **always shows the total and asks first** — nothing is charged until you type `y`.
 
 ## If something goes wrong
 - **“missing API key”** → the keys in `.env.local` aren’t set (setup step 3).
-- **“ffmpeg not found”** → install ffmpeg (setup step 1).
-- **A video failed** → run `npm run resume -- <run id>`; it skips the ones already
-  done, so you’re never charged twice.
+- **“credits exhausted” / it stopped partway** → run `npm run resume -- <run id>`
+  (the id is in the folder name under `outputs/`); finished videos are skipped, so
+  you’re never charged twice.
 - Still stuck? Send the developer the run id and the message you saw.
 
-## Changing the look
-- **Backgrounds:** drop image files into the **`backgrounds/`** folder — they’re used
-  automatically and rotated across videos.
-- **Presenters (avatars/voices):** ask the developer; these live in `src/config.ts`.
+## Changing the presenters
+The avatars + voices live in `src/config.ts` (`pools.iv`). Ask the developer to add or
+swap them — pick neutral, professional looks (no held mics, logos, or holiday scenes).

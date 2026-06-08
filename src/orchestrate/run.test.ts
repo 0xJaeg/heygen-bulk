@@ -199,4 +199,18 @@ describe("runPipeline", () => {
     expect(res.entries).toHaveLength(0)
     store.close()
   })
+
+  it("flags a second row that resolves to the same job id (duplicate)", async () => {
+    const { anthropic, client } = mocks()
+    const store = new JobStore(":memory:")
+    // two identical rows (same product_name, no row_id) → same job id
+    const res = await runPipeline(
+      { rows: [row(), row()], runId: "run1", config: makeConfig(), model: "m", concurrency: 1 },
+      { anthropic, client, store, cache: fakeCache(), ...io() }
+    )
+    expect(res.entries).toHaveLength(1) // only the first builds a job
+    expect(res.buildFailures).toHaveLength(1)
+    expect(res.buildFailures[0]!.reason).toMatch(/duplicate/i)
+    store.close()
+  })
 })

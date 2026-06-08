@@ -78,37 +78,41 @@ non-technical operator needs (see `HANDOFF.md`).
 
 | Command | What it does |
 |---|---|
+| `start [--source <csv\|url>] [--yes]` | **The one-command path.** Show the plan + est. cost, confirm once (y/n), then generate all. (`npm start`) |
 | `status` | Validate env + print effective config. (`npm run check`) |
-| `list-pool` | List HeyGen avatars + voices (to fill `config.pools`). (`npm run pool`) |
+| `list-pool` | List HeyGen avatars + voices (to fill `pools.iv`). (`npm run pool`) |
 | `list-templates` | List saved HeyGen templates. |
-| `dry-run --source <csv\|url>` | Validate rows + generate scripts + estimate cost. **No video spend.** (`npm run preview`) |
-| `sample --source <csv\|url> [--limit N]` | Render a small QA batch (default `config.sampleSize`) into `outputs/<run>__SAMPLE/`. (`npm run sample`) |
-| `approve <runId>` | Approve a sample run so production can proceed. (`npm run approve -- <runId>`) |
-| `production --source <csv\|url> [--yes]` | Render all eligible rows. Blocked until a sample is approved; `--yes` bypasses the cost-guard confirmation. (`npm run make`) |
+| `dry-run --source <csv\|url>` | Validate rows + show scripts + estimate cost. **No video spend.** (`npm run preview`) |
+| `sample --source <csv\|url> [--limit N]` | Render a small QA batch into `outputs/<run>__SAMPLE/`. (`npm run sample`) |
+| `approve <runId>` | Approve a sample run so `production` can proceed. (`npm run approve -- <runId>`) |
+| `production --source <csv\|url> [--yes]` | Render all eligible rows; **blocked until a sample is approved**. (`npm run make`) |
 | `resume <runId> --source <csv\|url>` | Re-run a run id; completed jobs are skipped, in-flight ones re-polled. (`npm run resume -- <runId>`) |
+
+`start` vs `sample`/`approve`/`make`: `start` is the simple all-in-one (one confirm
+replaces the approval gate) — what a non-technical operator uses. The granular
+commands give finer control (QA a few, then a separate gated production run).
 
 ---
 
-## Workflow: QA first, then scale
+## Workflow
 
+**Simple (the operator path):** edit `data/products.csv`, then —
 ```bash
-# 1. Preview scripts + cost, no spend
-npm run preview
+npm start          # shows "N videos, ~$X", asks y/n, then generates all
+```
 
-# 2. Render a few real videos, review the index.html it prints
-npm run sample
-
-# 3. Approve the reviewed run, then make all of them
-npm run approve -- <runId>
-npm run make
-
-# Resume after an interruption (no double charges)
-npm run resume -- <runId>
+**Granular (QA first, then a gated production run):**
+```bash
+npm run preview                 # scripts + cost, no spend
+npm run sample                  # render a few, review the index.html it prints
+npm run approve -- <runId>      # approve the reviewed run
+npm run make                    # render all (blocked until approved)
+npm run resume -- <runId>       # resume after an interruption (no double charges)
 ```
 
 These shortcuts read `data/products.csv`. To point at a different file or a
-**published Google-Sheet CSV URL** (`File → Share → Publish to web → CSV`), call the
-CLI directly with `--source <pathOrUrl>` (same parser for files and Sheet URLs).
+**published Google-Sheet CSV URL** (`File → Share → Publish to web → CSV`), pass
+`--source <pathOrUrl>` (e.g. `npm start -- --source <url>`; same parser for both).
 
 ---
 
@@ -117,6 +121,10 @@ CLI directly with `--source <pathOrUrl>` (same parser for files and Sheet URLs).
 Headers are **flexible** — a forgiving mapper handles `Product Name`, `CTA`,
 `Benefits`, etc. Empty cells fall back to defaults. The file you edit is
 `data/products.csv`, pre-loaded with example rows (pre-written scripts + gender).
+
+**Every row must resolve to a unique job** — give each a unique `row_id` (or a unique
+`product_name`). Reusing a name across a series (e.g. "5 Tips") **without** a `row_id`
+makes only one video; the run reports a "duplicate id" for the rest.
 
 | Column | Required | Notes |
 |---|---|---|
@@ -136,7 +144,7 @@ Headers are **flexible** — a forgiving mapper handles `Product Name`, `CTA`,
 | `orientation` | — | `portrait/landscape/square` |
 | `num_variations` | — | 1–5 (default 1) — distinct *generated* scripts per product (ignored when `script` is provided) |
 | `skip` | — | `true` to exclude a row without deleting it |
-| `row_id` | — | stable id for caching/idempotency (else derived from name+description) |
+| `row_id` | — | Stable **unique** id per row (else derived from `product_name`+`description`). **Required when rows share a `product_name`**, or they collapse to one job ("duplicate id"). |
 
 ---
 

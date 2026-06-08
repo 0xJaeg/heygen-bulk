@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { createInterface } from "node:readline/promises"
 import { Command } from "commander"
 import { getAnthropic } from "./anthropic.js"
 import { config, type Env, loadEnv } from "./config.js"
@@ -25,6 +26,14 @@ const sleep = (ms: number): Promise<void> =>
 
 function timestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "")
+}
+
+/** Ask a yes/no question on the terminal; returns true only for y / yes. */
+async function confirm(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  const answer = (await rl.question(question)).trim().toLowerCase()
+  rl.close()
+  return answer === "y" || answer === "yes"
 }
 
 function requireHeygen(env: Env): void {
@@ -246,6 +255,43 @@ program
     console.log(`If it looks good, approve it then make all the videos:`)
     console.log(`  npm run approve -- ${runId}`)
     console.log(`  npm run make`)
+  })
+
+program
+  .command("start")
+  .description("One-command run: show the plan + cost, confirm once, then generate all")
+  .option("--source <pathOrUrl>", "CSV path or published Google-Sheet CSV URL", "data/products.csv")
+  .option("--yes", "skip the confirmation prompt (for automation)")
+  .action(async (opts: { source: string; yes?: boolean }) => {
+    const env = loadEnv()
+    requireHeygen(env)
+    const { rows, errors, skipped } = await loadRows(opts.source)
+    reportIngest(rows.length, errors, skipped)
+    if (rows.length === 0) {
+      console.error("No products to generate — check your CSV.")
+      process.exitCode = 1
+      return
+    }
+    const videos = plannedVideoCount(rows)
+    const est = estimateCreditUsd(
+      videos,
+      ASSUMED_SECONDS,
+      config.heygen.pricePerMinuteUsd[config.defaults.engine]
+    )
+    const n = `${videos} video${videos === 1 ? "" : "s"}`
+    console.log(
+      `\nReady to generate ${n} (${config.defaults.avatarEngine}, ${config.defaults.resolution}) — est. cost ≈ $${est.toFixed(2)}.`
+    )
+    if (!opts.yes && !(await confirm(`Generate ${n} for ~$${est.toFixed(2)}? (y/n) `))) {
+      console.log("Cancelled — nothing was generated.")
+      return
+    }
+    const runId = timestamp()
+    const runDir = join(config.paths.outputs, runId)
+    const result = await executeRun(rows, runId, runDir, env)
+    const { indexPath } = await writeRun(runDir, toManifest(runId, "production", result))
+    printSummary(result)
+    console.log(`\nDone. Watch them: open ${indexPath}`)
   })
 
 program
