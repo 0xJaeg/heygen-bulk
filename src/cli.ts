@@ -2,16 +2,14 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Command } from "commander"
 import { getAnthropic } from "./anthropic.js"
-import { config, type Env, type Orientation, loadEnv } from "./config.js"
+import { config, type Env, loadEnv } from "./config.js"
 import {
   estimateCreditUsd,
   guardLevel,
   plannedVideoCount,
 } from "./cost/estimate.js"
-import { loadBackgrounds } from "./heygen/backgrounds.js"
 import { HeyGenClient } from "./heygen/client.js"
 import { makeFileDownloader } from "./heygen/download.js"
-import { ffmpegCoverResize } from "./heygen/resize.js"
 import { type RowError, loadRows } from "./ingest/load.js"
 import { type RunManifest, writeRun } from "./ledger/manifest.js"
 import { recordApproval } from "./orchestrate/gate.js"
@@ -27,12 +25,6 @@ const sleep = (ms: number): Promise<void> =>
 
 function timestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "")
-}
-
-function orientationDims(o: Orientation): { width: number; height: number } {
-  if (o === "landscape") return { width: 1920, height: 1080 }
-  if (o === "square") return { width: 1080, height: 1080 }
-  return { width: 1080, height: 1920 }
 }
 
 function requireHeygen(env: Env): void {
@@ -99,25 +91,6 @@ async function executeRun(
     baseUrl: env.HEYGEN_BASE_URL,
   })
   try {
-    // Composited backgrounds are a v2-only feature; iv photo avatars and v3 agents
-    // bring their own scene, so skip the upload entirely on those paths.
-    if (config.defaults.engine === "v2") {
-      const backgrounds = await loadBackgrounds({
-        dir: config.paths.backgrounds,
-        client,
-        cachePath: join(config.paths.cache, "backgrounds.json"),
-        target: orientationDims(config.defaults.orientation),
-        resize: (bytes, w, h) =>
-          ffmpegCoverResize(bytes, w, h, config.defaults.backgroundBlur),
-        processTag: `:b${config.defaults.backgroundBlur ?? 0}`,
-      })
-      if (backgrounds.length > 0) {
-        config.pools.v2.backgrounds = backgrounds
-        console.log(
-          `Using ${backgrounds.length} background image(s) from ${config.paths.backgrounds}/`
-        )
-      }
-    }
     return await runPipeline(
       {
         rows,
@@ -163,9 +136,9 @@ program
           : "")
     )
     const iv = config.pools.iv.avatars
+    const vo = config.pools.iv.voices
     console.log(`  IV avatars:       ${iv.female.length} female / ${iv.male.length} male`)
-    const av = config.pools.v2.avatars
-    console.log(`  V2 avatars:       ${av.female.length} female / ${av.male.length} male`)
+    console.log(`  IV voices:        ${vo.female.length} female / ${vo.male.length} male`)
   })
 
 program
@@ -192,7 +165,8 @@ program
       console.log(`  ${v.voice_id}  ${v.name ?? ""}${meta ? ` [${meta}]` : ""}`)
     }
     console.log(
-      "\nAssign the ids you want to src/config.ts → pools.v2 (by gender: male/female)."
+      "\nFor Avatar IV/V, discover photo-avatar looks via GET /v3/avatars/looks and" +
+        "\nassign them to src/config.ts → pools.iv (by gender, avatar paired with voice)."
     )
   })
 

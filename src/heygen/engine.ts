@@ -11,8 +11,7 @@ export interface EngineDeps {
   store: JobStore
   download: (url: string, basename: string) => Promise<string>
   sleep: (ms: number) => Promise<void>
-  pricePerMinuteUsd: { v2: number; v3: number; iv: number }
-  statusPathV2?: string
+  pricePerMinuteUsd: { v3: number; iv: number }
   poll?: {
     base?: number
     factor?: number
@@ -26,11 +25,10 @@ export interface EngineDeps {
 export function estimateCost(
   engine: string,
   durationSec: number | null,
-  price: { v2: number; v3: number; iv: number }
+  price: { v3: number; iv: number }
 ): number {
   if (durationSec == null) return 0
-  const perMinute =
-    engine === "iv" ? price.iv : engine === "v3" ? price.v3 : price.v2
+  const perMinute = engine === "v3" ? price.v3 : price.iv
   return (durationSec / 60) * perMinute
 }
 
@@ -43,25 +41,6 @@ async function submit(spec: JobSpec, deps: EngineDeps): Promise<string> {
       aspectRatio: spec.aspectRatio!,
       resolution: spec.resolution!,
       avatarEngine: spec.avatarEngine!,
-    })
-    deps.store.patch(spec.jobId, { status: "submitted", heygen_video_id: videoId })
-    return videoId
-  }
-
-  if (spec.engine === "v2") {
-    const videoId = await deps.client.createV2({
-      avatarId: spec.avatarId!,
-      avatarStyle: spec.avatarStyle,
-      scale: spec.avatarScale,
-      offset: spec.avatarOffset,
-      voiceId: spec.voiceId!,
-      inputText: spec.script,
-      width: spec.width,
-      height: spec.height,
-      background: spec.background,
-      caption: spec.caption,
-      title: spec.title,
-      callbackId: spec.jobId,
     })
     deps.store.patch(spec.jobId, { status: "submitted", heygen_video_id: videoId })
     return videoId
@@ -106,10 +85,8 @@ async function pollToTerminal(
   const max = deps.poll?.max ?? 30000
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const status =
-      spec.engine === "v2"
-        ? await deps.client.getStatusV2(videoId, deps.statusPathV2)
-        : await deps.client.getStatusV3(videoId)
+    // Both iv (/v3/videos) and v3 video-agents poll the same /v3/videos/{id} endpoint.
+    const status = await deps.client.getStatusV3(videoId)
     if (status.state === "completed" || status.state === "failed") return status
     deps.store.patch(spec.jobId, { status: "processing" })
     await deps.sleep(backoffMs(attempt, { base, factor, max }))

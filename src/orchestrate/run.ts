@@ -139,7 +139,6 @@ export async function runPipeline(
     download: deps.download,
     sleep: deps.sleep,
     pricePerMinuteUsd: config.heygen.pricePerMinuteUsd,
-    statusPathV2: config.heygen.statusPathV2,
     concurrency: opts.concurrency,
     maxRetries: opts.maxRetries,
   })

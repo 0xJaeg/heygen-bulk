@@ -4,11 +4,10 @@ Generate short (<60s) AI-avatar promo videos at scale from a product/offer list.
 Claude writes one promo script per product; **HeyGen** renders the video. Designed
 to QA a few samples, then scale to ~200–400/day (6–12k/month).
 
-> **Status (2026-06-05):** the full pipeline is built and unit-tested. Samples
-> render end-to-end with audio and a HeyGen background. **Backgrounds** are now
-> sourced from the `backgrounds/` folder — every image is uploaded to HeyGen once
-> (cached) and rotated across videos; captions are off by default. Remaining: drop
-> the teammate's actual scene images into `backgrounds/` for the final look.
+> **Status:** the full pipeline is built and unit-tested, validated end-to-end with
+> audio. The default engine is HeyGen **Avatar IV/V photo avatars** — photorealistic
+> people in their own settings, so there are **no backgrounds to manage**. Pick/curate
+> photo avatars in `src/config.ts → pools.iv`; the operator just edits `data/products.csv`.
 
 ---
 
@@ -23,7 +22,7 @@ CSV / published Google-Sheet
         │  jobSpec = buildJobSpec(row, script)                     ← engine/avatar/voice/format
         ▼
   generation engine (concurrency-capped)
-        │  HeyGen V2 (avatar + pool)  or  V3 (auto-compose)
+        │  HeyGen Avatar IV/V photo avatar (POST /v3/videos)
         │  create → poll w/ backoff → download MP4
         ▼
   outputs/<run>/  +  manifest.json  +  index.html (review page)
@@ -34,11 +33,11 @@ CSV / published Google-Sheet
   budget (prompt → one corrective retry → deterministic sentence-boundary trim).
   They're **cached by a content hash**, so the scripts you approve at QA are reused
   **verbatim and free** at scale, and re-runs never re-pay.
-- **Three engines** (per-row `engine`, else `defaults.engine`): **`iv`** — the
-  **default** — renders photorealistic **Avatar IV/V photo avatars** (`/v3/videos`;
-  the avatar brings its own setting); **V2** (`/v2/video/generate`) renders a studio
-  avatar+voice from a curated pool over a composited background; **V3**
-  (`/v3/video-agents`) auto-composes from a prompt. `iv` is premium-priced (see Cost).
+- **Engines** (per-row `engine`, else `defaults.engine`): **`iv`** — the **default +
+  workhorse** — renders photorealistic **Avatar IV/V photo avatars** (`/v3/videos`; the
+  avatar brings its own setting, sized via `aspect_ratio`+`resolution`). **`v3`**
+  (`/v3/video-agents`) auto-composes from a prompt (opt-in, unused). `iv` is premium-priced
+  (see Cost). _(The older `v2` studio-avatar + composited-background engine was removed.)_
 - **The engine** is idempotent and resumable: a stable `job_id` and a `node:sqlite`
   ledger mean a crash never double-charges (it re-polls an existing HeyGen video id
   instead of re-creating). Capped concurrency, backoff polling, retries, and a
@@ -55,19 +54,16 @@ npm install
 cp .env.example .env.local      # set ANTHROPIC_API_KEY and HEYGEN_API_KEY
 ```
 
-Discover your HeyGen avatars/voices (and templates), then put the ids you want into
-`src/config.ts` → `pools.v2`:
+Curate the **photo-avatar pool** in `src/config.ts → pools.iv` — gender-split look ids,
+each paired (same array index) with its matched default voice. Discover looks via
+`GET /v3/avatars/looks` (all `photo_avatar`; filter for `avatar_iv`/`avatar_v` support);
+vet them for props/context (no held mics, logos, or themed/holiday settings). `npm run pool`
+also lists `/v2/avatars`. Photo avatars bring their own setting — there are no backgrounds.
 
 ```bash
-npx tsx src/cli.ts list-pool        # avatars + voices
-npx tsx src/cli.ts list-templates   # saved templates (if any)
-npx tsx src/cli.ts status           # confirm env + effective config
+npx tsx src/cli.ts status           # confirm env + effective config (engine, pool sizes)
+npx tsx src/cli.ts list-pool        # browse HeyGen avatars + voices
 ```
-
-Put scene **background images** in `backgrounds/` (see `backgrounds/README.md`):
-each is **cover-cropped to the video size** (needs `ffmpeg` on PATH), uploaded to
-HeyGen once, and **rotated across videos**. Add/remove freely; an empty folder
-falls back to the `pools.v2.backgrounds` placeholder color.
 
 > `dry-run` only needs `ANTHROPIC_API_KEY`; everything that renders also needs
 > `HEYGEN_API_KEY`. Either `.env` or `.env.local` works (loaded via dotenv-flow).
@@ -133,7 +129,7 @@ Headers are **flexible** — a forgiving mapper handles `Product Name`, `CTA`,
 | `target_audience` | — | |
 | `tone` | — | `energetic`(default)`/professional/friendly/luxury/playful` |
 | `language` | — | default `en` |
-| `engine` | — | `iv`(default — Avatar IV/V photo avatars)`/v2/v3` — per-row override |
+| `engine` | — | `iv`(default — Avatar IV/V photo avatars)`/v3` — per-row override |
 | `gender` | — | `male`/`female` (also `M`/`F`). Picks a matching avatar **and** voice from the gender pool. Default configurable. |
 | `avatar_id` | — | per-row override (else gendered pool rotation) |
 | `voice_id` | — | per-row override (else pool rotation) |
@@ -155,18 +151,13 @@ Editable knobs (secrets stay in `.env`). Per-row CSV values override these.
 | `sampleSize` | default `--sample` size |
 | `defaults` | `{ engine, orientation, numVariations }` |
 | `pools.iv` | `{ avatars, voices }` photo-avatar look ids + matched default voices (gender-split, **parallel** arrays — `avatars[g][i]` ↔ `voices[g][i]`) for the default `iv` engine |
-| `pools.v2` / `pools.v3` | `{ avatars: {male,female}, voices: {male,female}, formats[] }` — gender-split rotation pools (v2 also `backgrounds[]`) |
+| `pools.v3` | `{ avatars, voices }` for the opt-in `v3` video-agents engine (usually empty — the agent auto-selects) |
 | `defaults.avatarEngine` / `defaults.resolution` | `iv` tier (`avatar_v`/`avatar_iv`) + output (`1080p`/`720p`/`4k`) |
 | `defaults.gender` | `male`/`female` used when a row omits `gender` |
-| `defaults.avatarStyle` | HeyGen framing: `normal` (default — natural medium shot with "(Upper Body)" avatars) or `closeUp` (tighter head-and-shoulders) |
-| `defaults.avatarScale` | Avatar zoom (`1` = native). `1.6` makes the avatar taller so it fills the 9:16 height (no desk/floor gap below); lower leaves a gap, higher trims headroom |
-| `defaults.avatarOffset` | Normalized `{x,y}` shift; `y: 0.07` (positive = down) anchors the avatar lower so the torso runs off the bottom edge while the head keeps headroom |
-| `defaults.backgroundBlur` | Gaussian blur sigma on background images (depth-of-field); `0` = off |
-| `rotation` | `"hash"` (implemented) or `"round-robin"` (planned) |
+| `rotation` | `"hash"` (implemented) or `"round-robin"` (planned — for unique-per-product at M9) |
 | `paths` | `{ outputs, cache, ledger }` |
 | `costGuard` | `{ warnAboveVideos, requireConfirmAboveVideos }` |
-| `heygen.statusPathV2` | V2 status endpoint (config constant — docs show variants) |
-| `heygen.pricePerMinuteUsd` | `{ v2: 1, v3: 2 }` — for cost estimates |
+| `heygen.pricePerMinuteUsd` | `{ v3: 2, iv: 4 }` — for cost estimates (`iv` USD is a placeholder; see Cost) |
 
 ---
 
@@ -195,31 +186,31 @@ credits are recorded in the ledger + manifest.
 
 ## Troubleshooting
 
-- **Bare/blank background** → drop scene images into `backgrounds/`; each is uploaded
-  to HeyGen once and rotated across videos. An empty folder uses the
-  `pools.v2.backgrounds` placeholder color.
-- **White side-bars, or a "resume" head-and-shoulders crop in 9:16** → use
-  **"(Upper Body)"** avatars (the pool default — they fill a portrait as a natural
-  medium shot at `avatarStyle: "normal"`). Tight landscape studio avatars pillarbox,
-  and forcing them to fill (`closeUp`) crops to a headshot.
+- **Off-context avatar** (held mic, logo, themed/holiday setting) → that's the photo
+  avatar's own baked-in scene; prune it from `pools.iv` and pick a neutral look
+  (preview `preview_image_url` from `GET /v3/avatars/looks` before adding).
+- **Wrong aspect / pillarboxed** → the `iv` output size is set by `aspect_ratio`
+  (from the row's `orientation`) + `defaults.resolution`; prefer **portrait** photo
+  avatars (`preferred_orientation: "portrait"`) for 9:16.
+- **`credits exhausted`** → Avatar IV/V is premium (20 credits/min); the engine
+  circuit-breaks, stops submitting, and you `resume <runId>` after topping up.
 - **"No audio" in the review page** → ensure you're on the current build; the
   `<video>` src is a basename resolved next to `index.html`. The MP4s themselves
   carry the voiceover (AAC).
 - **`unable to open database file`** → fixed; `JobStore` creates its parent dir.
 - **429s / throughput** → set `MAX_CONCURRENCY` in `.env` to your HeyGen plan's
-  concurrent-generation cap (the real throughput ceiling; default 3).
-- **`credits exhausted`** → the engine circuit-breaks and stops submitting; top up
-  and `resume <runId>` to finish.
+  concurrent-generation cap (the real throughput ceiling; default 3). Note Avatar V
+  renders ~3× slower than Avatar IV.
 
 ## Known gaps / next
 
-- **Backgrounds**: drop the teammate's generated scene images into `backgrounds/`
-  (uploaded once, then rotated across videos). Captions are off by default. The
-  Template path (`Save as Template` → fill the script variable via
-  `POST /v2/template/{id}/generate`) remains an option for HeyGen-composed
-  multi-scene videos.
-- **Variety**: seeded pool rotation can cluster at small N (a sample landed on one
-  voice). Consider wiring `rotation: "round-robin"` and/or matched avatar↔voice pairs.
+- **Avatar pool**: vet + expand `pools.iv` with neutral, prop-free photo avatars
+  (and/or custom brand avatars made from your own photos in HeyGen).
+- **Unique-per-product (M9)**: assignment is deterministic per product but seeded
+  rotation can repeat a face at small N. Wire `rotation: "round-robin"` for maximal
+  spread (each product a distinct avatar until the pool is exhausted).
+- **Completion**: polling today; webhooks (`callback_id`) are an incremental upgrade
+  for an always-on deployment.
 - **Completion**: polling today; webhooks (`callback_id` is already sent) are an
   incremental upgrade for an always-on deployment.
 
@@ -242,13 +233,12 @@ src/
   ingest/                # loadRows: CSV file | published-CSV URL; parse + validate
   schema/row.ts          # ProductRowSchema (zod) + forgiving header mapping
   script/                # generate (Claude), prompt, word-budget, schema, cache
-  heygen/                # client (+uploadAsset), types, errors, engine, backoff, download, backgrounds
-  jobs/build-job.ts      # stable job id + pool rotation + buildJobSpec
+  heygen/                # client (createIvVideo + getStatusV3 + v3 agents), types, errors, engine, backoff, download
+  jobs/build-job.ts      # stable job id + gender-paired pool selection + buildJobSpec
   store/job-store.ts     # node:sqlite job ledger (idempotent, resumable)
   cost/estimate.ts       # video count + cost estimate + guard level
   ledger/manifest.ts     # manifest.json + index.html review page
   orchestrate/           # run pipeline + approval gate
 data/products.csv        # the product list the operator edits (starter rows included)
-backgrounds/             # drop scene images here (uploaded to HeyGen once, rotated)
 HANDOFF.md               # one-page runbook for a non-technical operator
 ```

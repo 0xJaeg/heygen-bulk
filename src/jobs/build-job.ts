@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto"
 import type { AppConfig, Engine, Gender, Orientation } from "../config.js"
-import type { Background } from "../heygen/types.js"
 import type { ProductRow } from "../schema/row.js"
 import type { PromoScript } from "../script/schema.js"
 
@@ -15,16 +14,11 @@ export interface JobSpec {
   height: number
   avatarId?: string
   voiceId?: string
-  avatarStyle?: string
-  avatarScale?: number
-  avatarOffset?: { x: number; y: number }
-  background?: Background
   /** Avatar IV/V ("iv" engine) output controls. */
   aspectRatio?: string
   resolution?: string
   avatarEngine?: string
-  caption?: boolean
-  /** Spoken script text (used as V2 input_text, or the V3 agent prompt). */
+  /** Spoken script text (the iv avatar's script, or the v3 agent prompt). */
   script: string
   title: string
 }
@@ -84,7 +78,7 @@ export function pickFromPool<T>(items: readonly T[], seed: string): T | undefine
 /**
  * Resolve a product row + script into a HeyGen job spec.
  * Precedence per field: explicit row override -> seeded pool rotation -> config default.
- * Fails (without spending a credit) when a V2 job has no avatar/voice available.
+ * Fails (without spending a credit) when an "iv" job has no avatar/voice available.
  */
 export function buildJobSpec(args: {
   row: ProductRow
@@ -98,21 +92,13 @@ export function buildJobSpec(args: {
   const jobId = stableJobId(productId, variationIndex, engine)
 
   const isIv = engine === "iv"
-  const pool =
-    engine === "iv"
-      ? config.pools.iv
-      : engine === "v3"
-        ? config.pools.v3
-        : config.pools.v2
+  const pool = isIv ? config.pools.iv : config.pools.v3
   const gender: Gender = row.gender ?? config.defaults.gender ?? "female"
-  const orientation: Orientation =
-    row.orientation ??
-    pickFromPool(config.pools.v2.formats, `${jobId}:fmt`) ??
-    config.defaults.orientation
+  const orientation: Orientation = row.orientation ?? config.defaults.orientation
   const dims = DIMENSIONS[orientation]
 
-  // "iv" pairs avatar[i] with its matched voice[i] (parallel arrays); v2/v3 pick
-  // avatar and voice independently.
+  // "iv" pairs avatar[i] with its matched voice[i] (parallel arrays); v3 picks
+  // avatar and voice independently (and tolerates an empty pool — the agent auto-selects).
   let avatarId: string | undefined
   let voiceId: string | undefined
   if (isIv) {
@@ -124,20 +110,15 @@ export function buildJobSpec(args: {
     voiceId = row.voice_id ?? pickFromPool(pool.voices[gender], `${jobId}:voice`)
   }
 
-  if ((engine === "v2" || isIv) && (!avatarId || !voiceId)) {
+  if (isIv && (!avatarId || !voiceId)) {
     return {
       ok: false,
       productId,
       variationIndex,
-      reason: `${engine} job needs an avatar and a voice, but none was provided and the pool is empty`,
+      reason:
+        "iv job needs an avatar and a voice, but none was provided and the pool is empty",
     }
   }
-
-  const caption = config.defaults.caption ?? false
-  const background =
-    engine === "v2"
-      ? pickFromPool(config.pools.v2.backgrounds ?? [], `${jobId}:bg`)
-      : undefined
 
   return {
     ok: true,
@@ -152,16 +133,10 @@ export function buildJobSpec(args: {
       height: dims.height,
       avatarId,
       voiceId,
-      // Studio-avatar (v2) framing — omitted for the iv photo-avatar path.
-      avatarStyle: isIv ? undefined : config.defaults.avatarStyle,
-      avatarScale: isIv ? undefined : config.defaults.avatarScale,
-      avatarOffset: isIv ? undefined : config.defaults.avatarOffset,
-      background,
       // Avatar IV/V output controls (iv path only).
       aspectRatio: isIv ? ASPECT[orientation] : undefined,
       resolution: isIv ? config.defaults.resolution : undefined,
       avatarEngine: isIv ? config.defaults.avatarEngine : undefined,
-      caption,
       script: script.script,
       title: script.title,
     },

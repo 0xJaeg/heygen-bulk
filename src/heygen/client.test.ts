@@ -22,98 +22,10 @@ function makeClient(handler: (url: string) => { status?: number; body?: unknown 
   const client = new HeyGenClient({
     apiKey: "k",
     baseUrl: "https://api.test",
-    uploadBaseUrl: "https://upload.test",
     fetchImpl,
   })
   return { client, calls }
 }
-
-describe("HeyGenClient.createV2", () => {
-  it("posts to /v2/video/generate with auth + avatar/voice and returns video_id", async () => {
-    const { client, calls } = makeClient(() => ({
-      body: { code: 100, data: { video_id: "vid_1" } },
-    }))
-    const id = await client.createV2({
-      avatarId: "av_1",
-      voiceId: "vo_1",
-      inputText: "Hello",
-      width: 1080,
-      height: 1920,
-    })
-    expect(id).toBe("vid_1")
-    expect(calls[0]!.url).toBe("https://api.test/v2/video/generate")
-    expect(calls[0]!.init.method).toBe("POST")
-    expect(calls[0]!.init.headers!["X-Api-Key"]).toBe("k")
-    const body = JSON.parse(calls[0]!.init.body!)
-    expect(body.video_inputs[0].character.avatar_id).toBe("av_1")
-    expect(body.video_inputs[0].voice.voice_id).toBe("vo_1")
-    expect(body.video_inputs[0].voice.input_text).toBe("Hello")
-    expect(body.dimension).toEqual({ width: 1080, height: 1920 })
-  })
-
-  it("throws a HeyGenApiError when the API returns a non-100 code", async () => {
-    const { client } = makeClient(() => ({
-      body: { code: 40001, message: "bad avatar" },
-    }))
-    await expect(
-      client.createV2({
-        avatarId: "x",
-        voiceId: "y",
-        inputText: "z",
-        width: 1,
-        height: 1,
-      })
-    ).rejects.toBeInstanceOf(HeyGenApiError)
-  })
-
-  it("passes avatar_style through to the character", async () => {
-    const { client, calls } = makeClient(() => ({
-      body: { code: 100, data: { video_id: "v" } },
-    }))
-    await client.createV2({
-      avatarId: "av_1",
-      voiceId: "vo_1",
-      inputText: "Hi",
-      width: 1080,
-      height: 1920,
-      avatarStyle: "closeUp",
-    })
-    const body = JSON.parse(calls[0]!.init.body!)
-    expect(body.video_inputs[0].character.avatar_style).toBe("closeUp")
-  })
-
-  it("passes character scale through (avatar height/fill control)", async () => {
-    const { client, calls } = makeClient(() => ({
-      body: { code: 100, data: { video_id: "v" } },
-    }))
-    await client.createV2({
-      avatarId: "a",
-      voiceId: "b",
-      inputText: "x",
-      width: 1080,
-      height: 1920,
-      scale: 1.4,
-    })
-    const body = JSON.parse(calls[0]!.init.body!)
-    expect(body.video_inputs[0].character.scale).toBe(1.4)
-  })
-
-  it("passes character offset through (vertical anchor)", async () => {
-    const { client, calls } = makeClient(() => ({
-      body: { code: 100, data: { video_id: "v" } },
-    }))
-    await client.createV2({
-      avatarId: "a",
-      voiceId: "b",
-      inputText: "x",
-      width: 1080,
-      height: 1920,
-      offset: { x: 0, y: 0.07 },
-    })
-    const body = JSON.parse(calls[0]!.init.body!)
-    expect(body.video_inputs[0].character.offset).toEqual({ x: 0, y: 0.07 })
-  })
-})
 
 describe("HeyGenClient.createIvVideo", () => {
   it("posts an Avatar IV/V request to /v3/videos and returns video_id", async () => {
@@ -130,104 +42,70 @@ describe("HeyGenClient.createIvVideo", () => {
     })
     expect(id).toBe("iv_1")
     expect(calls[0]!.url).toBe("https://api.test/v3/videos")
+    expect(calls[0]!.init.method).toBe("POST")
+    expect(calls[0]!.init.headers!["X-Api-Key"]).toBe("k")
     const body = JSON.parse(calls[0]!.init.body!)
     expect(body.type).toBe("avatar")
     expect(body.avatar_id).toBe("look_1")
     expect(body.voice_id).toBe("voice_1")
+    expect(body.script).toBe("Hi")
     expect(body.aspect_ratio).toBe("9:16")
     expect(body.resolution).toBe("1080p")
     expect(body.engine).toEqual({ type: "avatar_v" })
   })
+
+  it("throws a HeyGenApiError on a non-2xx response", async () => {
+    const { client } = makeClient(() => ({
+      status: 400,
+      body: { error: { message: "bad avatar" } },
+    }))
+    await expect(
+      client.createIvVideo({
+        avatarId: "x",
+        voiceId: "y",
+        script: "z",
+        aspectRatio: "9:16",
+        resolution: "1080p",
+        avatarEngine: "avatar_v",
+      })
+    ).rejects.toBeInstanceOf(HeyGenApiError)
+  })
 })
 
-describe("HeyGenClient.getStatusV2", () => {
-  it("normalizes a completed status", async () => {
+describe("HeyGenClient.getStatusV3", () => {
+  it("normalizes a completed status (used by the iv path)", async () => {
     const { client, calls } = makeClient(() => ({
+      body: { data: { status: "completed", video_url: "http://x/v.mp4", duration: 42 } },
+    }))
+    const status = await client.getStatusV3("vid_1")
+    expect(calls[0]!.url).toBe("https://api.test/v3/videos/vid_1")
+    expect(status.state).toBe("completed")
+    expect(status.videoUrl).toBe("http://x/v.mp4")
+    expect(status.durationSec).toBe(42)
+  })
+
+  it("normalizes a failed status with code + message", async () => {
+    const { client } = makeClient(() => ({
       body: {
-        code: 100,
-        data: { status: "completed", video_url: "http://x/v.mp4", duration: 42 },
+        data: { status: "failed", failure_code: "E1", failure_message: "render error" },
       },
     }))
-    const s = await client.getStatusV2("vid_1")
-    expect(s.state).toBe("completed")
-    expect(s.videoUrl).toBe("http://x/v.mp4")
-    expect(s.durationSec).toBe(42)
-    expect(calls[0]!.url).toBe(
-      "https://api.test/v1/video_status.get?video_id=vid_1"
-    )
-  })
-
-  it("maps a failed status and surfaces the error", async () => {
-    const { client } = makeClient(() => ({
-      body: { code: 100, data: { status: "failed", error: { message: "render failed" } } },
-    }))
-    const s = await client.getStatusV2("vid_1")
-    expect(s.state).toBe("failed")
-    expect(s.failure).toContain("render failed")
+    const status = await client.getStatusV3("vid_1")
+    expect(status.state).toBe("failed")
+    expect(status.failure).toContain("render error")
   })
 })
 
-describe("HeyGenClient error handling", () => {
-  it("throws transient on 500 and rate_limited on 429", async () => {
-    const five = makeClient(() => ({ status: 500, body: { message: "server error" } }))
-    await expect(five.client.getStatusV2("v")).rejects.toMatchObject({
-      kind: "transient",
-    })
-    const rate = makeClient(() => ({ status: 429, body: { message: "slow down" } }))
-    await expect(rate.client.getStatusV2("v")).rejects.toMatchObject({
-      kind: "rate_limited",
-    })
-  })
-})
-
-describe("HeyGenClient v3 + listVoices", () => {
-  it("creates a v3 session and returns session_id", async () => {
+describe("HeyGenClient.createV3", () => {
+  it("posts a video-agents request to /v3/video-agents and returns session_id", async () => {
     const { client, calls } = makeClient(() => ({
       body: { data: { session_id: "sess_1" } },
     }))
-    const sid = await client.createV3({ prompt: "Make a promo", callbackId: "job_1" })
-    expect(sid).toBe("sess_1")
+    const id = await client.createV3({ prompt: "make a promo", orientation: "portrait" })
+    expect(id).toBe("sess_1")
     expect(calls[0]!.url).toBe("https://api.test/v3/video-agents")
-  })
-
-  it("returns the voices array", async () => {
-    const { client } = makeClient(() => ({
-      body: { code: 100, data: { voices: [{ voice_id: "v1", name: "Amy" }] } },
-    }))
-    expect(await client.listVoices()).toEqual([{ voice_id: "v1", name: "Amy" }])
-  })
-})
-
-describe("HeyGenClient.listTemplates", () => {
-  it("returns the templates array", async () => {
-    const { client } = makeClient(() => ({
-      body: { data: { templates: [{ template_id: "t1", name: "Promo" }] } },
-    }))
-    expect(await client.listTemplates()).toEqual([
-      { template_id: "t1", name: "Promo" },
-    ])
-  })
-})
-
-describe("HeyGenClient.uploadAsset", () => {
-  it("posts image bytes to the upload host and returns the asset id", async () => {
-    const { client, calls } = makeClient(() => ({
-      body: { code: 100, data: { id: "asset_1" } },
-    }))
-    const id = await client.uploadAsset(new Uint8Array([1, 2, 3]), "image/png")
-    expect(id).toBe("asset_1")
-    expect(calls[0]!.url).toBe("https://upload.test/v1/asset")
-    expect(calls[0]!.init.method).toBe("POST")
-    expect(calls[0]!.init.headers!["Content-Type"]).toBe("image/png")
-    expect(calls[0]!.init.headers!["X-Api-Key"]).toBe("k")
-  })
-
-  it("accepts an image_key response field too", async () => {
-    const { client } = makeClient(() => ({
-      body: { data: { image_key: "asset_2" } },
-    }))
-    expect(await client.uploadAsset(new Uint8Array([9]), "image/jpeg")).toBe(
-      "asset_2"
-    )
+    const body = JSON.parse(calls[0]!.init.body!)
+    expect(body.prompt).toBe("make a promo")
+    expect(body.orientation).toBe("portrait")
   })
 })
