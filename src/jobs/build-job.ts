@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
-import type { AppConfig, Engine, Orientation } from "../config.js"
+import type { AppConfig, Engine, Gender, Orientation } from "../config.js"
+import type { Background } from "../heygen/types.js"
 import type { ProductRow } from "../schema/row.js"
 import type { PromoScript } from "../script/schema.js"
 
@@ -8,11 +9,17 @@ export interface JobSpec {
   productId: string
   variationIndex: number
   engine: Engine
+  gender: Gender
   orientation: Orientation
   width: number
   height: number
   avatarId?: string
   voiceId?: string
+  avatarStyle?: string
+  avatarScale?: number
+  avatarOffset?: { x: number; y: number }
+  background?: Background
+  caption?: boolean
   /** Spoken script text (used as V2 input_text, or the V3 agent prompt). */
   script: string
   title: string
@@ -32,7 +39,7 @@ const DIMENSIONS: Record<Orientation, { width: number; height: number }> = {
 export function productKey(row: ProductRow): string {
   if (row.row_id) return row.row_id
   const h = createHash("sha1")
-    .update(`${row.product_name}|${row.description}`)
+    .update(`${row.product_name}|${row.description ?? ""}`)
     .digest("hex")
     .slice(0, 12)
   return `p_${h}`
@@ -74,14 +81,17 @@ export function buildJobSpec(args: {
   const jobId = stableJobId(productId, variationIndex, engine)
 
   const pool = engine === "v3" ? config.pools.v3 : config.pools.v2
+  const gender: Gender = row.gender ?? config.defaults.gender ?? "female"
   const orientation: Orientation =
     row.orientation ??
     pickFromPool(config.pools.v2.formats, `${jobId}:fmt`) ??
     config.defaults.orientation
   const dims = DIMENSIONS[orientation]
 
-  const avatarId = row.avatar_id ?? pickFromPool(pool.avatars, `${jobId}:avatar`)
-  const voiceId = row.voice_id ?? pickFromPool(pool.voices, `${jobId}:voice`)
+  const avatarId =
+    row.avatar_id ?? pickFromPool(pool.avatars[gender], `${jobId}:avatar`)
+  const voiceId =
+    row.voice_id ?? pickFromPool(pool.voices[gender], `${jobId}:voice`)
 
   if (engine === "v2" && (!avatarId || !voiceId)) {
     return {
@@ -93,6 +103,12 @@ export function buildJobSpec(args: {
     }
   }
 
+  const caption = config.defaults.caption ?? false
+  const background =
+    engine === "v2"
+      ? pickFromPool(config.pools.v2.backgrounds ?? [], `${jobId}:bg`)
+      : undefined
+
   return {
     ok: true,
     spec: {
@@ -100,11 +116,17 @@ export function buildJobSpec(args: {
       productId,
       variationIndex,
       engine,
+      gender,
       orientation,
       width: dims.width,
       height: dims.height,
       avatarId,
       voiceId,
+      avatarStyle: config.defaults.avatarStyle,
+      avatarScale: config.defaults.avatarScale,
+      avatarOffset: config.defaults.avatarOffset,
+      background,
+      caption,
       script: script.script,
       title: script.title,
     },

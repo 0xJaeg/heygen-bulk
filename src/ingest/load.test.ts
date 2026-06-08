@@ -1,16 +1,14 @@
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { isUrl, loadRows, parseRows } from "./load.js"
-
-const here = dirname(fileURLToPath(import.meta.url))
-const sampleCsv = join(here, "../../examples/products.sample.csv")
 
 describe("isUrl", () => {
   it("distinguishes URLs from file paths", () => {
     expect(isUrl("https://docs.google.com/spreadsheets/d/x/gviz/tq")).toBe(true)
     expect(isUrl("http://example.com/data.csv")).toBe(true)
-    expect(isUrl("./examples/products.sample.csv")).toBe(false)
+    expect(isUrl("./examples/products.with-scripts.csv")).toBe(false)
     expect(isUrl("/abs/path/products.csv")).toBe(false)
   })
 })
@@ -33,8 +31,14 @@ describe("parseRows", () => {
 
 describe("loadRows", () => {
   it("loads rows from a local CSV file", async () => {
-    const result = await loadRows(sampleCsv)
-    expect(result.rows.length).toBeGreaterThan(0)
-    expect(result.rows[0]!.product_name).toBeTruthy()
+    const dir = await mkdtemp(join(tmpdir(), "loadrows-"))
+    const csv = join(dir, "products.csv")
+    await writeFile(
+      csv,
+      "product_name,description,call_to_action\nAcme,Great widget,Buy now\n"
+    )
+    const result = await loadRows(csv)
+    expect(result.rows.length).toBe(1)
+    expect(result.rows[0]!.product_name).toBe("Acme")
   })
 })

@@ -11,6 +11,7 @@ function v2Spec(over: Partial<JobSpec> = {}): JobSpec {
     productId: "p1",
     variationIndex: 0,
     engine: "v2",
+    gender: "female",
     orientation: "portrait",
     width: 1080,
     height: 1920,
@@ -118,6 +119,25 @@ describe("processJob", () => {
     expect(rec.status).toBe("completed")
     expect(client.createV2).not.toHaveBeenCalled()
     expect(client.getStatusV2).not.toHaveBeenCalled()
+    store.close()
+  })
+
+  it("passes caption and background through to createV2", async () => {
+    const store = new JobStore(":memory:")
+    const createV2 = vi.fn(async () => "vid")
+    const getStatusV2 = vi.fn(async () => done())
+    const d = deps({ createV2, getStatusV2 }, store)
+    await processJob(
+      v2Spec({ caption: true, background: { type: "color", value: "#111" } }),
+      "run1",
+      d
+    )
+    expect(createV2).toHaveBeenCalledWith(
+      expect.objectContaining({
+        caption: true,
+        background: { type: "color", value: "#111" },
+      })
+    )
     store.close()
   })
 })

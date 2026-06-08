@@ -22,6 +22,7 @@ function makeClient(handler: (url: string) => { status?: number; body?: unknown 
   const client = new HeyGenClient({
     apiKey: "k",
     baseUrl: "https://api.test",
+    uploadBaseUrl: "https://upload.test",
     fetchImpl,
   })
   return { client, calls }
@@ -63,6 +64,54 @@ describe("HeyGenClient.createV2", () => {
         height: 1,
       })
     ).rejects.toBeInstanceOf(HeyGenApiError)
+  })
+
+  it("passes avatar_style through to the character", async () => {
+    const { client, calls } = makeClient(() => ({
+      body: { code: 100, data: { video_id: "v" } },
+    }))
+    await client.createV2({
+      avatarId: "av_1",
+      voiceId: "vo_1",
+      inputText: "Hi",
+      width: 1080,
+      height: 1920,
+      avatarStyle: "closeUp",
+    })
+    const body = JSON.parse(calls[0]!.init.body!)
+    expect(body.video_inputs[0].character.avatar_style).toBe("closeUp")
+  })
+
+  it("passes character scale through (avatar height/fill control)", async () => {
+    const { client, calls } = makeClient(() => ({
+      body: { code: 100, data: { video_id: "v" } },
+    }))
+    await client.createV2({
+      avatarId: "a",
+      voiceId: "b",
+      inputText: "x",
+      width: 1080,
+      height: 1920,
+      scale: 1.4,
+    })
+    const body = JSON.parse(calls[0]!.init.body!)
+    expect(body.video_inputs[0].character.scale).toBe(1.4)
+  })
+
+  it("passes character offset through (vertical anchor)", async () => {
+    const { client, calls } = makeClient(() => ({
+      body: { code: 100, data: { video_id: "v" } },
+    }))
+    await client.createV2({
+      avatarId: "a",
+      voiceId: "b",
+      inputText: "x",
+      width: 1080,
+      height: 1920,
+      offset: { x: 0, y: 0.07 },
+    })
+    const body = JSON.parse(calls[0]!.init.body!)
+    expect(body.video_inputs[0].character.offset).toEqual({ x: 0, y: 0.07 })
   })
 })
 
@@ -132,5 +181,28 @@ describe("HeyGenClient.listTemplates", () => {
     expect(await client.listTemplates()).toEqual([
       { template_id: "t1", name: "Promo" },
     ])
+  })
+})
+
+describe("HeyGenClient.uploadAsset", () => {
+  it("posts image bytes to the upload host and returns the asset id", async () => {
+    const { client, calls } = makeClient(() => ({
+      body: { code: 100, data: { id: "asset_1" } },
+    }))
+    const id = await client.uploadAsset(new Uint8Array([1, 2, 3]), "image/png")
+    expect(id).toBe("asset_1")
+    expect(calls[0]!.url).toBe("https://upload.test/v1/asset")
+    expect(calls[0]!.init.method).toBe("POST")
+    expect(calls[0]!.init.headers!["Content-Type"]).toBe("image/png")
+    expect(calls[0]!.init.headers!["X-Api-Key"]).toBe("k")
+  })
+
+  it("accepts an image_key response field too", async () => {
+    const { client } = makeClient(() => ({
+      body: { data: { image_key: "asset_2" } },
+    }))
+    expect(await client.uploadAsset(new Uint8Array([9]), "image/jpeg")).toBe(
+      "asset_2"
+    )
   })
 })

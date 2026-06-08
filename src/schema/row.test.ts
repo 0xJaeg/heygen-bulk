@@ -76,4 +76,31 @@ describe("validateRow", () => {
       expect(r.row.tone).toBe("luxury")
     }
   })
+
+  it("normalizes the gender column (male/female, incl. M/F and aliases)", () => {
+    const male = validateRow({ ...valid, gender: "Male" }, 0)
+    expect(male.ok).toBe(true)
+    if (male.ok) expect(male.row.gender).toBe("male")
+
+    const f = validateRow({ ...valid, gender: "F" }, 0)
+    expect(f.ok).toBe(true)
+    if (f.ok) expect(f.row.gender).toBe("female")
+
+    const aliased = validateRow({ ...valid, Sex: "female" }, 0)
+    expect(aliased.ok).toBe(true)
+    if (aliased.ok) expect(aliased.row.gender).toBe("female")
+  })
+
+  it("accepts a provided script column, including aliases like VO", () => {
+    const r1 = validateRow({ ...valid, script: "Pre-written voiceover." }, 0)
+    expect(r1.ok).toBe(true)
+    if (r1.ok) expect(r1.row.script).toBe("Pre-written voiceover.")
+
+    const r2 = validateRow(
+      { "Product Name": "Acme", Description: "x", CTA: "Buy", VO: "From VO column." },
+      0
+    )
+    expect(r2.ok).toBe(true)
+    if (r2.ok) expect(r2.row.script).toBe("From VO column.")
+  })
 })

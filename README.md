@@ -4,12 +4,11 @@ Generate short (<60s) AI-avatar promo videos at scale from a product/offer list.
 Claude writes one promo script per product; **HeyGen** renders the video. Designed
 to QA a few samples, then scale to ~200–400/day (6–12k/month).
 
-> **Status (2026-06-05):** the full pipeline is built and unit-tested (79 tests).
-> A first sample rendered end-to-end successfully (4 videos, with audio). The one
-> open item is **matching the teammate's designed look** (background + captions):
-> the account has no saved HeyGen templates, so we're waiting on the teammate's
-> exact setup (template vs background image, captions, avatar/voice) before
-> finalizing the production look. See **Known gaps** below.
+> **Status (2026-06-05):** the full pipeline is built and unit-tested. Samples
+> render end-to-end with audio and a HeyGen background. **Backgrounds** are now
+> sourced from the `backgrounds/` folder — every image is uploaded to HeyGen once
+> (cached) and rotated across videos; captions are off by default. Remaining: drop
+> the teammate's actual scene images into `backgrounds/` for the final look.
 
 ---
 
@@ -63,6 +62,11 @@ npx tsx src/cli.ts list-templates   # saved templates (if any)
 npx tsx src/cli.ts status           # confirm env + effective config
 ```
 
+Put scene **background images** in `backgrounds/` (see `backgrounds/README.md`):
+each is **cover-cropped to the video size** (needs `ffmpeg` on PATH), uploaded to
+HeyGen once, and **rotated across videos**. Add/remove freely; an empty folder
+falls back to the `pools.v2.backgrounds` placeholder color.
+
 > `dry-run` only needs `ANTHROPIC_API_KEY`; everything that renders also needs
 > `HEYGEN_API_KEY`. Either `.env` or `.env.local` works (loaded via dotenv-flow).
 
@@ -89,10 +93,10 @@ Run any command with `npx tsx src/cli.ts <command>` (npm shortcuts noted):
 
 ```bash
 # 1. Preview scripts + cost, no spend
-npx tsx src/cli.ts dry-run --source examples/products.sample.csv
+npx tsx src/cli.ts dry-run --source examples/products.with-scripts.csv
 
 # 2. Render a few real videos, review the index.html it prints
-npx tsx src/cli.ts sample --source examples/products.sample.csv --limit 3
+npx tsx src/cli.ts sample --source examples/products.with-scripts.csv --limit 3
 
 # 3. Approve, then go to production
 npx tsx src/cli.ts approve <runId>
@@ -110,24 +114,26 @@ npx tsx src/cli.ts resume <runId> --source path/to/products.csv
 ## Input CSV
 
 Headers are **flexible** — a forgiving mapper handles `Product Name`, `CTA`,
-`Benefits`, etc. Empty cells fall back to defaults. See `examples/products.sample.csv`
-(full) and `examples/products.minimal.csv` (3 required columns only).
+`Benefits`, etc. Empty cells fall back to defaults. See
+`examples/products.with-scripts.csv` for an example (pre-written scripts + gender).
 
 | Column | Required | Notes |
 |---|---|---|
 | `product_name` | ✅ | |
-| `description` | ✅ | What it is / why it matters |
-| `call_to_action` | ✅ | Ends the script |
+| `script` | — | **Pre-written voiceover.** If present, used verbatim — Claude is skipped (no cost), it's not trimmed, and `num_variations` is ignored. A provided-script row only needs `product_name` + `script`. Aliases: `VO`, `Voiceover`, `VSL`. |
+| `description` | ✅* | What it is / why it matters. *Required only when `script` is empty.* |
+| `call_to_action` | ✅* | Ends the script. *Required only when `script` is empty.* |
 | `key_benefits` | — | `;`-separated list |
 | `price` | — | Free-form (`$49`, `from £20`) |
 | `target_audience` | — | |
 | `tone` | — | `energetic`(default)`/professional/friendly/luxury/playful` |
 | `language` | — | default `en` |
 | `engine` | — | `v2`(default)`/v3` — per-row override |
-| `avatar_id` | — | per-row override (else pool rotation) |
+| `gender` | — | `male`/`female` (also `M`/`F`). Picks a matching avatar **and** voice from the gender pool. Default configurable. |
+| `avatar_id` | — | per-row override (else gendered pool rotation) |
 | `voice_id` | — | per-row override (else pool rotation) |
 | `orientation` | — | `portrait/landscape/square` |
-| `num_variations` | — | 1–5 (default 1) — distinct scripts per product |
+| `num_variations` | — | 1–5 (default 1) — distinct *generated* scripts per product (ignored when `script` is provided) |
 | `skip` | — | `true` to exclude a row without deleting it |
 | `row_id` | — | stable id for caching/idempotency (else derived from name+description) |
 
@@ -143,7 +149,12 @@ Editable knobs (secrets stay in `.env`). Per-row CSV values override these.
 | `scriptWordBudget` | `{ target: 130, max: 140 }` — the <60s guarantee |
 | `sampleSize` | default `--sample` size |
 | `defaults` | `{ engine, orientation, numVariations }` |
-| `pools.v2` / `pools.v3` | `{ avatars[], voices[], formats[] }` — curated rotation pools |
+| `pools.v2` / `pools.v3` | `{ avatars: {male,female}, voices: {male,female}, formats[] }` — gender-split rotation pools |
+| `defaults.gender` | `male`/`female` used when a row omits `gender` |
+| `defaults.avatarStyle` | HeyGen framing: `normal` (default — natural medium shot with "(Upper Body)" avatars) or `closeUp` (tighter head-and-shoulders) |
+| `defaults.avatarScale` | Avatar zoom (`1` = native). `1.6` makes the avatar taller so it fills the 9:16 height (no desk/floor gap below); lower leaves a gap, higher trims headroom |
+| `defaults.avatarOffset` | Normalized `{x,y}` shift; `y: 0.07` (positive = down) anchors the avatar lower so the torso runs off the bottom edge while the head keeps headroom |
+| `defaults.backgroundBlur` | Gaussian blur sigma on background images (depth-of-field); `0` = off |
 | `rotation` | `"hash"` (implemented) or `"round-robin"` (planned) |
 | `paths` | `{ outputs, cache, ledger }` |
 | `costGuard` | `{ warnAboveVideos, requireConfirmAboveVideos }` |
@@ -173,9 +184,13 @@ per-video credits are recorded in the ledger and manifest.
 
 ## Troubleshooting
 
-- **Bare/blank background** → the raw V2 call needs a `background`. Match a designed
-  look via a HeyGen **Template** (`list-templates` → fill its text variable) or set a
-  background image/color. *(This is the current open item — see Known gaps.)*
+- **Bare/blank background** → drop scene images into `backgrounds/`; each is uploaded
+  to HeyGen once and rotated across videos. An empty folder uses the
+  `pools.v2.backgrounds` placeholder color.
+- **White side-bars, or a "resume" head-and-shoulders crop in 9:16** → use
+  **"(Upper Body)"** avatars (the pool default — they fill a portrait as a natural
+  medium shot at `avatarStyle: "normal"`). Tight landscape studio avatars pillarbox,
+  and forcing them to fill (`closeUp`) crops to a headshot.
 - **"No audio" in the review page** → ensure you're on the current build; the
   `<video>` src is a basename resolved next to `index.html`. The MP4s themselves
   carry the voiceover (AAC).
@@ -187,9 +202,11 @@ per-video credits are recorded in the ledger and manifest.
 
 ## Known gaps / next
 
-- **Match the teammate's designed look** (background + captions) — pending their
-  setup. Preferred path: they `Save as Template` in HeyGen, then we fill the
-  script variable per product via `POST /v2/template/{id}/generate`.
+- **Backgrounds**: drop the teammate's generated scene images into `backgrounds/`
+  (uploaded once, then rotated across videos). Captions are off by default. The
+  Template path (`Save as Template` → fill the script variable via
+  `POST /v2/template/{id}/generate`) remains an option for HeyGen-composed
+  multi-scene videos.
 - **Variety**: seeded pool rotation can cluster at small N (a sample landed on one
   voice). Consider wiring `rotation: "round-robin"` and/or matched avatar↔voice pairs.
 - **Completion**: polling today; webhooks (`callback_id` is already sent) are an
@@ -214,11 +231,12 @@ src/
   ingest/                # loadRows: CSV file | published-CSV URL; parse + validate
   schema/row.ts          # ProductRowSchema (zod) + forgiving header mapping
   script/                # generate (Claude), prompt, word-budget, schema, cache
-  heygen/                # client, types, errors, engine, poller-backoff, download
+  heygen/                # client (+uploadAsset), types, errors, engine, backoff, download, backgrounds
   jobs/build-job.ts      # stable job id + pool rotation + buildJobSpec
   store/job-store.ts     # node:sqlite job ledger (idempotent, resumable)
   cost/estimate.ts       # video count + cost estimate + guard level
   ledger/manifest.ts     # manifest.json + index.html review page
   orchestrate/           # run pipeline + approval gate
 examples/                # sample product CSVs
+backgrounds/             # drop scene images here (uploaded to HeyGen once, rotated)
 ```

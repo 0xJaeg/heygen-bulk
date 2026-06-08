@@ -14,12 +14,29 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
     scriptWordBudget: { target: 130, max: 140 },
     sampleSize: 3,
     rotation: "hash",
-    defaults: { engine: "v2", orientation: "portrait", numVariations: 1 },
-    pools: {
-      v2: { avatars: ["av_a"], voices: ["vo_a"], formats: ["portrait"] },
-      v3: { avatars: [], voices: [] },
+    defaults: {
+      engine: "v2",
+      orientation: "portrait",
+      numVariations: 1,
+      gender: "female",
     },
-    paths: { outputs: "./outputs", cache: "./.cache", ledger: ":memory:" },
+    pools: {
+      v2: {
+        avatars: { female: ["av_a"], male: [] },
+        voices: { female: ["vo_a"], male: [] },
+        formats: ["portrait"],
+      },
+      v3: {
+        avatars: { female: [], male: [] },
+        voices: { female: [], male: [] },
+      },
+    },
+    paths: {
+      outputs: "./outputs",
+      cache: "./.cache",
+      ledger: ":memory:",
+      backgrounds: "./backgrounds",
+    },
     costGuard: { warnAboveVideos: 50, requireConfirmAboveVideos: 200 },
     heygen: {
       statusPathV2: "/v1/video_status.get",
@@ -149,13 +166,39 @@ describe("runPipeline", () => {
     store.close()
   })
 
+  it("uses a provided script verbatim and skips Anthropic", async () => {
+    const { anthropic, client, parse } = mocks()
+    const store = new JobStore(":memory:")
+    const res = await runPipeline(
+      {
+        rows: [row({ script: "Pre-written voiceover here." })],
+        runId: "run1",
+        config: makeConfig(),
+        model: "m",
+        concurrency: 1,
+      },
+      { anthropic, client, store, cache: fakeCache(), ...io() }
+    )
+    expect(parse).not.toHaveBeenCalled()
+    expect(res.entries[0]!.script).toBe("Pre-written voiceover here.")
+    expect(res.entries[0]!.status).toBe("completed")
+    store.close()
+  })
+
   it("collects build failures when the pool is empty", async () => {
     const { anthropic, client } = mocks()
     const store = new JobStore(":memory:")
     const config = makeConfig({
       pools: {
-        v2: { avatars: [], voices: [], formats: ["portrait"] },
-        v3: { avatars: [], voices: [] },
+        v2: {
+          avatars: { female: [], male: [] },
+          voices: { female: [], male: [] },
+          formats: ["portrait"],
+        },
+        v3: {
+          avatars: { female: [], male: [] },
+          voices: { female: [], male: [] },
+        },
       },
     })
     const res = await runPipeline(

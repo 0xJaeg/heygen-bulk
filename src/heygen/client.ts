@@ -19,6 +19,8 @@ interface ApiEnvelope {
 export interface HeyGenClientOptions {
   apiKey: string
   baseUrl?: string
+  /** Asset uploads use a separate host. */
+  uploadBaseUrl?: string
   fetchImpl?: typeof fetch
 }
 
@@ -52,11 +54,13 @@ function asFailure(err: unknown): string | null {
 export class HeyGenClient {
   private readonly apiKey: string
   private readonly baseUrl: string
+  private readonly uploadBaseUrl: string
   private readonly fetchImpl: typeof fetch
 
   constructor(opts: HeyGenClientOptions) {
     this.apiKey = opts.apiKey
     this.baseUrl = opts.baseUrl ?? "https://api.heygen.com"
+    this.uploadBaseUrl = opts.uploadBaseUrl ?? "https://upload.heygen.com"
     this.fetchImpl = opts.fetchImpl ?? fetch
   }
 
@@ -121,14 +125,15 @@ export class HeyGenClient {
     }
     if (input.speed !== undefined) voice.speed = input.speed
 
-    const videoInput: Record<string, unknown> = {
-      character: {
-        type: "avatar",
-        avatar_id: input.avatarId,
-        avatar_style: "normal",
-      },
-      voice,
+    const character: Record<string, unknown> = {
+      type: "avatar",
+      avatar_id: input.avatarId,
+      avatar_style: input.avatarStyle ?? "normal",
     }
+    if (input.scale !== undefined) character.scale = input.scale
+    if (input.offset) character.offset = input.offset
+
+    const videoInput: Record<string, unknown> = { character, voice }
     if (input.background) videoInput.background = input.background
 
     const body: Record<string, unknown> = {
@@ -222,5 +227,52 @@ export class HeyGenClient {
   async listTemplates(): Promise<Template[]> {
     const env = await this.request("GET", "/v2/templates")
     return ((env.data ?? {}) as { templates?: Template[] }).templates ?? []
+  }
+
+  /** Upload raw image bytes to HeyGen; returns the asset id for use as a background. */
+  async uploadAsset(bytes: Uint8Array, contentType: string): Promise<string> {
+    let res: Response
+    try {
+      res = await this.fetchImpl(`${this.uploadBaseUrl}/v1/asset`, {
+        method: "POST",
+        headers: { "X-Api-Key": this.apiKey, "Content-Type": contentType },
+        body: bytes,
+      })
+    } catch (e) {
+      throw new HeyGenApiError(`network error: ${(e as Error).message}`, {
+        kind: "transient",
+      })
+    }
+
+    const text = await res.text()
+    let json: ApiEnvelope = {}
+    if (text) {
+      try {
+        json = JSON.parse(text) as ApiEnvelope
+      } catch {
+        json = {}
+      }
+    }
+
+    if (!res.ok || (typeof json.code === "number" && json.code !== 100)) {
+      const message =
+        json.message ?? json.error?.message ?? `upload failed (HTTP ${res.status})`
+      throw new HeyGenApiError(message, {
+        status: res.status,
+        code: json.code,
+        kind: classifyError({ status: res.status, code: json.code, message }),
+      })
+    }
+
+    const data = (json.data ?? {}) as {
+      id?: string
+      image_key?: string
+      asset_id?: string
+    }
+    const id = data.id ?? data.image_key ?? data.asset_id
+    if (!id) {
+      throw new HeyGenApiError("upload returned no asset id", { kind: "permanent" })
+    }
+    return id
   }
 }

@@ -2,14 +2,16 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Command } from "commander"
 import { getAnthropic } from "./anthropic.js"
-import { config, type Env, loadEnv } from "./config.js"
+import { config, type Env, type Orientation, loadEnv } from "./config.js"
 import {
   estimateCreditUsd,
   guardLevel,
   plannedVideoCount,
 } from "./cost/estimate.js"
+import { loadBackgrounds } from "./heygen/backgrounds.js"
 import { HeyGenClient } from "./heygen/client.js"
 import { makeFileDownloader } from "./heygen/download.js"
+import { ffmpegCoverResize } from "./heygen/resize.js"
 import { type RowError, loadRows } from "./ingest/load.js"
 import { type RunManifest, writeRun } from "./ledger/manifest.js"
 import { recordApproval } from "./orchestrate/gate.js"
@@ -25,6 +27,12 @@ const sleep = (ms: number): Promise<void> =>
 
 function timestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "")
+}
+
+function orientationDims(o: Orientation): { width: number; height: number } {
+  if (o === "landscape") return { width: 1920, height: 1080 }
+  if (o === "square") return { width: 1080, height: 1080 }
+  return { width: 1080, height: 1920 }
 }
 
 function requireHeygen(env: Env): void {
@@ -86,7 +94,26 @@ async function executeRun(
   env: Env
 ): Promise<PipelineResult> {
   const store = new JobStore(config.paths.ledger)
+  const client = new HeyGenClient({
+    apiKey: env.HEYGEN_API_KEY,
+    baseUrl: env.HEYGEN_BASE_URL,
+  })
   try {
+    const backgrounds = await loadBackgrounds({
+      dir: config.paths.backgrounds,
+      client,
+      cachePath: join(config.paths.cache, "backgrounds.json"),
+      target: orientationDims(config.defaults.orientation),
+      resize: (bytes, w, h) =>
+        ffmpegCoverResize(bytes, w, h, config.defaults.backgroundBlur),
+      processTag: `:b${config.defaults.backgroundBlur ?? 0}`,
+    })
+    if (backgrounds.length > 0) {
+      config.pools.v2.backgrounds = backgrounds
+      console.log(
+        `Using ${backgrounds.length} background image(s) from ${config.paths.backgrounds}/`
+      )
+    }
     return await runPipeline(
       {
         rows,
@@ -97,10 +124,7 @@ async function executeRun(
       },
       {
         anthropic: getAnthropic(),
-        client: new HeyGenClient({
-          apiKey: env.HEYGEN_API_KEY,
-          baseUrl: env.HEYGEN_BASE_URL,
-        }),
+        client,
         store,
         cache: new FileScriptCache(join(config.paths.cache, "scripts")),
         download: makeFileDownloader(runDir),
@@ -128,8 +152,10 @@ program
     console.log(`  HeyGen base URL:  ${env.HEYGEN_BASE_URL}`)
     console.log(`  Max concurrency:  ${env.MAX_CONCURRENCY}`)
     console.log(`  Script model:     ${config.models.script}`)
-    console.log(`  V2 pool avatars:  ${config.pools.v2.avatars.length}`)
-    console.log(`  V2 pool voices:   ${config.pools.v2.voices.length}`)
+    const av = config.pools.v2.avatars
+    const vo = config.pools.v2.voices
+    console.log(`  V2 avatars:       ${av.female.length} female / ${av.male.length} male`)
+    console.log(`  V2 voices:        ${vo.female.length} female / ${vo.male.length} male`)
   })
 
 program
@@ -152,9 +178,12 @@ program
     }
     console.log(`\nVoices (${voices.length}):`)
     for (const v of voices.slice(0, 50)) {
-      console.log(`  ${v.voice_id}${v.name ? `  (${v.name}${v.language ? `, ${v.language}` : ""})` : ""}`)
+      const meta = [v.gender, v.language].filter(Boolean).join(", ")
+      console.log(`  ${v.voice_id}  ${v.name ?? ""}${meta ? ` [${meta}]` : ""}`)
     }
-    console.log("\nAdd the ids you want to src/config.ts → pools.v2.")
+    console.log(
+      "\nAssign the ids you want to src/config.ts → pools.v2 (by gender: male/female)."
+    )
   })
 
 program

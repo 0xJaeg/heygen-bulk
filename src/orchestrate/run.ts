@@ -63,33 +63,39 @@ export async function runPipeline(
   const buildFailures: PipelineResult["buildFailures"] = []
 
   for (const row of rows) {
-    for (let v = 0; v < row.num_variations; v++) {
-      const key = scriptCacheKey({
-        model,
-        promptVersion: PROMPT_VERSION,
-        row,
-        variationIndex: v,
-      })
-      const cached = await deps.cache.get(key)
+    // A provided script is used verbatim — no Claude, no auto-variations.
+    const variations = row.script ? 1 : row.num_variations
+    for (let v = 0; v < variations; v++) {
       let script: PromoScript
-      if (cached) {
-        script = { hook: cached.hook, script: cached.script, title: cached.title }
+      if (row.script) {
+        script = { hook: "", script: row.script, title: row.product_name }
       } else {
-        const gen = await generateScript({
+        const key = scriptCacheKey({
+          model,
+          promptVersion: PROMPT_VERSION,
           row,
           variationIndex: v,
-          anthropic: deps.anthropic,
-          model,
-          maxWords: config.scriptWordBudget.max,
         })
-        script = gen.script
-        await deps.cache.put(key, {
-          hook: script.hook,
-          script: script.script,
-          title: script.title,
-          model: gen.model,
-          promptVersion: gen.promptVersion,
-        })
+        const cached = await deps.cache.get(key)
+        if (cached) {
+          script = { hook: cached.hook, script: cached.script, title: cached.title }
+        } else {
+          const gen = await generateScript({
+            row,
+            variationIndex: v,
+            anthropic: deps.anthropic,
+            model,
+            maxWords: config.scriptWordBudget.max,
+          })
+          script = gen.script
+          await deps.cache.put(key, {
+            hook: script.hook,
+            script: script.script,
+            title: script.title,
+            model: gen.model,
+            promptVersion: gen.promptVersion,
+          })
+        }
       }
 
       const built = buildJobSpec({ row, script, variationIndex: v, config })

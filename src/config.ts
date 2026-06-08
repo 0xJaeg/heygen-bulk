@@ -1,20 +1,41 @@
 import "dotenv-flow/config"
 import { z } from "zod/v4"
+import type { Background } from "./heygen/types.js"
 
 export type Engine = "v2" | "v3"
 export type Orientation = "portrait" | "landscape" | "square"
+export type Gender = "male" | "female"
 
 export interface AppConfig {
   models: { script: string; qaScript: string }
   scriptWordBudget: { target: number; max: number }
   sampleSize: number
   rotation: "hash" | "round-robin"
-  defaults: { engine: Engine; orientation: Orientation; numVariations: number }
-  pools: {
-    v2: { avatars: string[]; voices: string[]; formats: Orientation[] }
-    v3: { avatars: string[]; voices: string[] }
+  defaults: {
+    engine: Engine
+    orientation: Orientation
+    numVariations: number
+    gender?: Gender
+    /** HeyGen avatar framing: "normal" suits "(Upper Body)" avatars (natural medium shot). */
+    avatarStyle?: string
+    /** Avatar zoom (1 = native); a modest >1 makes the avatar taller to fill the 9:16 height. */
+    avatarScale?: number
+    /** Normalized translate (fraction of frame); positive y shifts the avatar down. */
+    avatarOffset?: { x: number; y: number }
+    /** Gaussian blur sigma applied to background images (depth-of-field look). 0 = off. */
+    backgroundBlur?: number
+    caption?: boolean
   }
-  paths: { outputs: string; cache: string; ledger: string }
+  pools: {
+    v2: {
+      avatars: Record<Gender, string[]>
+      voices: Record<Gender, string[]>
+      formats: Orientation[]
+      backgrounds?: Background[]
+    }
+    v3: { avatars: Record<Gender, string[]>; voices: Record<Gender, string[]> }
+  }
+  paths: { outputs: string; cache: string; ledger: string; backgrounds: string }
   costGuard: { warnAboveVideos: number; requireConfirmAboveVideos: number }
   heygen: { statusPathV2: string; pricePerMinuteUsd: Record<Engine, number> }
 }
@@ -29,28 +50,71 @@ export const config: AppConfig = {
   scriptWordBudget: { target: 130, max: 140 },
   sampleSize: 3,
   rotation: "hash",
-  defaults: { engine: "v2", orientation: "portrait", numVariations: 1 },
+  defaults: {
+    engine: "v2",
+    orientation: "portrait",
+    numVariations: 1,
+    gender: "female",
+    // "(Upper Body)" pool avatars (below) render at "normal" as a natural medium
+    // shot filling the 9:16 width with the background edge-to-edge. avatarScale +
+    // avatarOffset fill the frame *height*: scale (1.6) enlarges the avatar, and a
+    // small downward offset.y (0.07) anchors it lower so the torso runs off the
+    // BOTTOM edge (no desk/floor gap) while the head keeps headroom. Scaling alone
+    // can't — a centered avatar crops the head at the top before the bottom fills.
+    avatarStyle: "normal",
+    avatarScale: 1.6,
+    avatarOffset: { x: 0, y: 0.07 },
+    backgroundBlur: 10, // soft depth-of-field blur on backgrounds
+    caption: false,
+  },
   pools: {
     v2: {
-      // Starter pool — edit freely (run `list-pool` to see all options).
-      avatars: [
-        "Abigail_expressive_2024112501", // Abigail (Upper Body)
-        "Aditya_public_1", // Aditya in Blue blazer
-        "Adriana_Business_Front_public", // Adriana Business Front
-      ],
-      voices: [
-        "331f8b8067e74485a192275ae5e834bf", // Personal Story
-        "b2b8b2f48aa0490a9be65868483cd6c3", // Shocking Claim
-        "2823804c532c47a6945459cfb8b31df0", // John 5 tips Female
-      ],
+      // Assign avatars/voices by gender. Verify voice genders with `list-pool`.
+      avatars: {
+        // "(Upper Body)" looks — natural medium-shot framing that fills a 9:16
+        // portrait at "normal" style. Swap in the teammate's brand avatars when
+        // available (`npm run list-pool` to discover ids).
+        female: [
+          "Abigail_expressive_2024112501", // Abigail (Upper Body)
+          "Aubrey_expressive_2024112701", // Aubrey (Upper Body)
+        ],
+        male: [
+          "Marcus_expressive_2024120201", // Marcus (Upper Body)
+          "francis_expressive_20240910", // Francis in Blazer (Upper Body)
+        ],
+      },
+      voices: {
+        // Custom brand voices have no gender metadata — these appear female
+        // (confirmed via a sample). Verify the full set with the teammate.
+        female: [
+          "2823804c532c47a6945459cfb8b31df0", // John 5 tips Female
+          "b2b8b2f48aa0490a9be65868483cd6c3", // Shocking Claim (confirmed female)
+        ],
+        // Placeholder standard male voice — swap for the teammate's male brand voice.
+        male: [
+          "88bb9ee1c81b466eb2a08fdde86d3619", // Adam Stone (standard, English, male)
+        ],
+      },
       formats: ["portrait"],
+      // Placeholder brand background — replace with the teammate's actual
+      // background once known (a brand image/video):
+      //   { type: "image", url: "https://..." }  or  { type: "image", image_asset_id: "..." }
+      //   { type: "video", url: "https://...", play_style: "loop" }
+      // Add more entries to rotate backgrounds for variety.
+      backgrounds: [{ type: "color", value: "#0B1F3A" }],
     },
-    v3: { avatars: [], voices: [] },
+    v3: {
+      avatars: { female: [], male: [] },
+      voices: { female: [], male: [] },
+    },
   },
   paths: {
     outputs: "./outputs",
     cache: "./.cache",
     ledger: "./.data/runs.sqlite",
+    // Drop background scene images here; each is uploaded to HeyGen once and
+    // rotated across videos. Empty/absent → falls back to pools.v2.backgrounds.
+    backgrounds: "./backgrounds",
   },
   costGuard: { warnAboveVideos: 50, requireConfirmAboveVideos: 200 },
   heygen: {

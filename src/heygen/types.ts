@@ -8,14 +8,30 @@ export interface VideoStatus {
   failure: string | null
 }
 
+export type Background =
+  | { type: "color"; value: string }
+  | { type: "image"; url?: string; image_asset_id?: string }
+  | {
+      type: "video"
+      url?: string
+      video_asset_id?: string
+      play_style?: string
+    }
+
 export interface CreateV2Request {
   avatarId: string
+  /** "normal" | "closeUp" | "circle". "normal" suits "(Upper Body)" avatars in 9:16. */
+  avatarStyle?: string
+  /** Avatar zoom multiplier (1 = native). >1 makes the avatar taller/larger to fill the frame. */
+  scale?: number
+  /** Normalized translate (fraction of frame); positive y shifts the avatar down. */
+  offset?: { x: number; y: number }
   voiceId: string
   inputText: string
   width: number
   height: number
   speed?: number
-  background?: { type: "color"; value: string } | { type: "image"; url: string }
+  background?: Background
   caption?: boolean
   title?: string
   callbackId?: string

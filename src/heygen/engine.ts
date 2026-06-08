@@ -37,10 +37,15 @@ async function submit(spec: JobSpec, deps: EngineDeps): Promise<string> {
   if (spec.engine === "v2") {
     const videoId = await deps.client.createV2({
       avatarId: spec.avatarId!,
+      avatarStyle: spec.avatarStyle,
+      scale: spec.avatarScale,
+      offset: spec.avatarOffset,
       voiceId: spec.voiceId!,
       inputText: spec.script,
       width: spec.width,
       height: spec.height,
+      background: spec.background,
+      caption: spec.caption,
       title: spec.title,
       callbackId: spec.jobId,
     })
