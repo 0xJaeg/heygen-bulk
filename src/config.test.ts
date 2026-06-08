@@ -13,7 +13,16 @@ describe("config", () => {
     expect(config.scriptWordBudget.max).toBeLessThanOrEqual(140)
   })
 
-  it("defaults to the controllable V2 engine", () => {
-    expect(config.defaults.engine).toBe("v2")
+  it("defaults to the Avatar IV/V (iv) engine with a tier + resolution set", () => {
+    expect(config.defaults.engine).toBe("iv")
+    expect(config.defaults.avatarEngine).toBe("avatar_v")
+    expect(config.defaults.resolution).toBe("1080p")
+  })
+
+  it("ships a gender-split iv photo-avatar pool with parallel avatar/voice arrays", () => {
+    for (const g of ["male", "female"] as const) {
+      expect(config.pools.iv.avatars[g].length).toBeGreaterThan(0)
+      expect(config.pools.iv.avatars[g].length).toBe(config.pools.iv.voices[g].length)
+    }
   })
 })

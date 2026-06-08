@@ -14,17 +14,31 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
     scriptWordBudget: { target: 130, max: 140 },
     sampleSize: 3,
     rotation: "hash",
-    defaults: { engine: "v2", orientation: "portrait", numVariations: 1 },
+    defaults: {
+      engine: "iv",
+      orientation: "portrait",
+      numVariations: 1,
+      gender: "female",
+      avatarEngine: "avatar_v",
+      resolution: "1080p",
+    },
     pools: {
-      v2: { avatars: ["av_a"], voices: ["vo_a"], formats: ["portrait"] },
-      v3: { avatars: [], voices: [] },
+      v3: {
+        avatars: { female: [], male: [] },
+        voices: { female: [], male: [] },
+      },
+      iv: {
+        avatars: { female: ["iv_f1"], male: [] },
+        voices: { female: ["ivv_f1"], male: [] },
+      },
     },
-    paths: { outputs: "./outputs", cache: "./.cache", ledger: ":memory:" },
+    paths: {
+      outputs: "./outputs",
+      cache: "./.cache",
+      ledger: ":memory:",
+    },
     costGuard: { warnAboveVideos: 50, requireConfirmAboveVideos: 200 },
-    heygen: {
-      statusPathV2: "/v1/video_status.get",
-      pricePerMinuteUsd: { v2: 1, v3: 2 },
-    },
+    heygen: { pricePerMinuteUsd: { v3: 2, iv: 4 } },
     ...over,
   }
 }
@@ -61,8 +75,8 @@ function mocks() {
       cache_creation_input_tokens: 0,
     },
   }))
-  const createV2 = vi.fn(async () => "vid")
-  const getStatusV2 = vi.fn(async () => ({
+  const createIvVideo = vi.fn(async () => "vid")
+  const getStatusV3 = vi.fn(async () => ({
     state: "completed",
     videoUrl: "http://x/v.mp4",
     durationSec: 30,
@@ -70,10 +84,10 @@ function mocks() {
   }))
   return {
     parse,
-    createV2,
-    getStatusV2,
+    createIvVideo,
+    getStatusV3,
     anthropic: { messages: { parse } } as unknown as Anthropic,
-    client: { createV2, getStatusV2 } as unknown as HeyGenClient,
+    client: { createIvVideo, getStatusV3 } as unknown as HeyGenClient,
   }
 }
 
@@ -84,7 +98,7 @@ const io = () => ({
 
 describe("runPipeline", () => {
   it("generates a script, builds a spec, runs the engine, returns a completed entry", async () => {
-    const { anthropic, client, createV2 } = mocks()
+    const { anthropic, client, createIvVideo } = mocks()
     const store = new JobStore(":memory:")
     const res = await runPipeline(
       { rows: [row()], runId: "run1", config: makeConfig(), model: "m", concurrency: 2 },
@@ -95,7 +109,7 @@ describe("runPipeline", () => {
     expect(res.entries[0]!.script).toBe("Generated.")
     expect(res.totals.completed).toBe(1)
     expect(res.totals.est_cost_usd).toBeGreaterThan(0)
-    expect(createV2).toHaveBeenCalledTimes(1)
+    expect(createIvVideo).toHaveBeenCalledTimes(1)
     store.close()
   })
 
@@ -128,7 +142,7 @@ describe("runPipeline", () => {
   })
 
   it("dry-run generates scripts + specs but never calls the engine", async () => {
-    const { anthropic, client, createV2 } = mocks()
+    const { anthropic, client, createIvVideo } = mocks()
     const store = new JobStore(":memory:")
     const ioDeps = io()
     const res = await runPipeline(
@@ -142,10 +156,29 @@ describe("runPipeline", () => {
       },
       { anthropic, client, store, cache: fakeCache(), ...ioDeps }
     )
-    expect(createV2).not.toHaveBeenCalled()
+    expect(createIvVideo).not.toHaveBeenCalled()
     expect(ioDeps.download).not.toHaveBeenCalled()
     expect(res.entries[0]!.status).toBe("planned")
     expect(res.entries[0]!.script).toBe("Generated.")
+    store.close()
+  })
+
+  it("uses a provided script verbatim and skips Anthropic", async () => {
+    const { anthropic, client, parse } = mocks()
+    const store = new JobStore(":memory:")
+    const res = await runPipeline(
+      {
+        rows: [row({ script: "Pre-written voiceover here." })],
+        runId: "run1",
+        config: makeConfig(),
+        model: "m",
+        concurrency: 1,
+      },
+      { anthropic, client, store, cache: fakeCache(), ...io() }
+    )
+    expect(parse).not.toHaveBeenCalled()
+    expect(res.entries[0]!.script).toBe("Pre-written voiceover here.")
+    expect(res.entries[0]!.status).toBe("completed")
     store.close()
   })
 
@@ -154,8 +187,8 @@ describe("runPipeline", () => {
     const store = new JobStore(":memory:")
     const config = makeConfig({
       pools: {
-        v2: { avatars: [], voices: [], formats: ["portrait"] },
-        v3: { avatars: [], voices: [] },
+        v3: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
+        iv: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
       },
     })
     const res = await runPipeline(
@@ -164,6 +197,20 @@ describe("runPipeline", () => {
     )
     expect(res.buildFailures).toHaveLength(1)
     expect(res.entries).toHaveLength(0)
+    store.close()
+  })
+
+  it("flags a second row that resolves to the same job id (duplicate)", async () => {
+    const { anthropic, client } = mocks()
+    const store = new JobStore(":memory:")
+    // two identical rows (same product_name, no row_id) → same job id
+    const res = await runPipeline(
+      { rows: [row(), row()], runId: "run1", config: makeConfig(), model: "m", concurrency: 1 },
+      { anthropic, client, store, cache: fakeCache(), ...io() }
+    )
+    expect(res.entries).toHaveLength(1) // only the first builds a job
+    expect(res.buildFailures).toHaveLength(1)
+    expect(res.buildFailures[0]!.reason).toMatch(/duplicate/i)
     store.close()
   })
 })

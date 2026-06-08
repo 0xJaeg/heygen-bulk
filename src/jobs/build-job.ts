@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import type { AppConfig, Engine, Orientation } from "../config.js"
+import type { AppConfig, Engine, Gender, Orientation } from "../config.js"
 import type { ProductRow } from "../schema/row.js"
 import type { PromoScript } from "../script/schema.js"
 
@@ -8,12 +8,17 @@ export interface JobSpec {
   productId: string
   variationIndex: number
   engine: Engine
+  gender: Gender
   orientation: Orientation
   width: number
   height: number
   avatarId?: string
   voiceId?: string
-  /** Spoken script text (used as V2 input_text, or the V3 agent prompt). */
+  /** Avatar IV/V ("iv" engine) output controls. */
+  aspectRatio?: string
+  resolution?: string
+  avatarEngine?: string
+  /** Spoken script text (the iv avatar's script, or the v3 agent prompt). */
   script: string
   title: string
 }
@@ -28,11 +33,18 @@ const DIMENSIONS: Record<Orientation, { width: number; height: number }> = {
   square: { width: 1080, height: 1080 },
 }
 
+/** HeyGen aspect_ratio string per orientation (used by the "iv" engine). */
+const ASPECT: Record<Orientation, string> = {
+  portrait: "9:16",
+  landscape: "16:9",
+  square: "1:1",
+}
+
 /** A row's stable identity: explicit row_id, else a hash of its grounding fields. */
 export function productKey(row: ProductRow): string {
   if (row.row_id) return row.row_id
   const h = createHash("sha1")
-    .update(`${row.product_name}|${row.description}`)
+    .update(`${row.product_name}|${row.description ?? ""}`)
     .digest("hex")
     .slice(0, 12)
   return `p_${h}`
@@ -50,17 +62,23 @@ export function stableJobId(
     .slice(0, 16)
 }
 
+/** Seeded, reproducible index into a list of length `len` (−1 when empty). */
+export function seededIndex(len: number, seed: string): number {
+  if (len === 0) return -1
+  const n = createHash("sha1").update(seed).digest().readUInt32BE(0)
+  return n % len
+}
+
 /** Seeded, reproducible choice from a pool. Returns undefined for an empty pool. */
 export function pickFromPool<T>(items: readonly T[], seed: string): T | undefined {
-  if (items.length === 0) return undefined
-  const n = createHash("sha1").update(seed).digest().readUInt32BE(0)
-  return items[n % items.length]
+  const i = seededIndex(items.length, seed)
+  return i < 0 ? undefined : items[i]
 }
 
 /**
  * Resolve a product row + script into a HeyGen job spec.
  * Precedence per field: explicit row override -> seeded pool rotation -> config default.
- * Fails (without spending a credit) when a V2 job has no avatar/voice available.
+ * Fails (without spending a credit) when an "iv" job has no avatar/voice available.
  */
 export function buildJobSpec(args: {
   row: ProductRow
@@ -73,23 +91,32 @@ export function buildJobSpec(args: {
   const engine: Engine = row.engine ?? config.defaults.engine
   const jobId = stableJobId(productId, variationIndex, engine)
 
-  const pool = engine === "v3" ? config.pools.v3 : config.pools.v2
-  const orientation: Orientation =
-    row.orientation ??
-    pickFromPool(config.pools.v2.formats, `${jobId}:fmt`) ??
-    config.defaults.orientation
+  const isIv = engine === "iv"
+  const pool = isIv ? config.pools.iv : config.pools.v3
+  const gender: Gender = row.gender ?? config.defaults.gender ?? "female"
+  const orientation: Orientation = row.orientation ?? config.defaults.orientation
   const dims = DIMENSIONS[orientation]
 
-  const avatarId = row.avatar_id ?? pickFromPool(pool.avatars, `${jobId}:avatar`)
-  const voiceId = row.voice_id ?? pickFromPool(pool.voices, `${jobId}:voice`)
+  // "iv" pairs avatar[i] with its matched voice[i] (parallel arrays); v3 picks
+  // avatar and voice independently (and tolerates an empty pool — the agent auto-selects).
+  let avatarId: string | undefined
+  let voiceId: string | undefined
+  if (isIv) {
+    const i = seededIndex(pool.avatars[gender].length, `${jobId}:iv`)
+    avatarId = row.avatar_id ?? (i < 0 ? undefined : pool.avatars[gender][i])
+    voiceId = row.voice_id ?? (i < 0 ? undefined : pool.voices[gender][i])
+  } else {
+    avatarId = row.avatar_id ?? pickFromPool(pool.avatars[gender], `${jobId}:avatar`)
+    voiceId = row.voice_id ?? pickFromPool(pool.voices[gender], `${jobId}:voice`)
+  }
 
-  if (engine === "v2" && (!avatarId || !voiceId)) {
+  if (isIv && (!avatarId || !voiceId)) {
     return {
       ok: false,
       productId,
       variationIndex,
       reason:
-        "v2 job needs an avatar and a voice, but none was provided and the pool is empty",
+        "iv job needs an avatar and a voice, but none was provided and the pool is empty",
     }
   }
 
@@ -100,11 +127,16 @@ export function buildJobSpec(args: {
       productId,
       variationIndex,
       engine,
+      gender,
       orientation,
       width: dims.width,
       height: dims.height,
       avatarId,
       voiceId,
+      // Avatar IV/V output controls (iv path only).
+      aspectRatio: isIv ? ASPECT[orientation] : undefined,
+      resolution: isIv ? config.defaults.resolution : undefined,
+      avatarEngine: isIv ? config.defaults.avatarEngine : undefined,
       script: script.script,
       title: script.title,
     },

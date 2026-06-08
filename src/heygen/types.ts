@@ -8,19 +8,6 @@ export interface VideoStatus {
   failure: string | null
 }
 
-export interface CreateV2Request {
-  avatarId: string
-  voiceId: string
-  inputText: string
-  width: number
-  height: number
-  speed?: number
-  background?: { type: "color"; value: string } | { type: "image"; url: string }
-  caption?: boolean
-  title?: string
-  callbackId?: string
-}
-
 export interface CreateV3Request {
   prompt: string
   avatarId?: string
@@ -29,6 +16,20 @@ export interface CreateV3Request {
   orientation?: "portrait" | "landscape"
   callbackUrl?: string
   callbackId?: string
+}
+
+/** Avatar IV/V photo-avatar video (POST /v3/videos). */
+export interface CreateIvVideoRequest {
+  /** A photo-avatar look id. */
+  avatarId: string
+  voiceId: string
+  script: string
+  /** "9:16" | "16:9" | "4:5" | "5:4" | "1:1". */
+  aspectRatio: string
+  /** "1080p" | "720p" | "4k". */
+  resolution: string
+  /** Engine tier: "avatar_v" (newest) | "avatar_iv". */
+  avatarEngine: string
 }
 
 export interface Avatar {

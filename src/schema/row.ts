@@ -1,6 +1,6 @@
 import { z } from "zod/v4"
 
-export const ENGINES = ["v2", "v3"] as const
+export const ENGINES = ["v3", "iv"] as const
 export const ORIENTATIONS = ["portrait", "landscape", "square"] as const
 export const TONES = [
   "energetic",
@@ -20,13 +20,25 @@ const csvBoolean = z.preprocess((v) => {
   return v // leave invalid value for zod to flag
 }, z.boolean())
 
+/** Normalize gender cells: M/Male/Man -> male; F/Female/Woman -> female. */
+const csvGender = z.preprocess((v) => {
+  if (typeof v !== "string") return v
+  const s = v.trim().toLowerCase()
+  if (["m", "male", "man"].includes(s)) return "male"
+  if (["f", "female", "woman"].includes(s)) return "female"
+  return s
+}, z.enum(["male", "female"]))
+
 export const ProductRowSchema = z.object({
   // identity / idempotency
   row_id: z.string().trim().min(1).optional(),
   // required — needed to write a grounded promo
   product_name: z.string().trim().min(1),
-  description: z.string().trim().min(1),
-  call_to_action: z.string().trim().min(1),
+  // Pre-written voiceover — if present, used verbatim (Claude is skipped).
+  script: z.string().trim().min(1).optional(),
+  // Required only when no script is provided (see refine below).
+  description: z.string().trim().min(1).optional(),
+  call_to_action: z.string().trim().min(1).optional(),
   // optional content
   key_benefits: z.string().trim().optional(),
   price: z.string().trim().optional(),
@@ -35,13 +47,21 @@ export const ProductRowSchema = z.object({
   language: z.string().trim().default("en"),
   // per-row engine / render overrides (else defaults + pool rotation)
   engine: z.enum(ENGINES).optional(),
+  gender: csvGender.optional(),
   avatar_id: z.string().trim().optional(),
   voice_id: z.string().trim().optional(),
   orientation: z.enum(ORIENTATIONS).optional(),
   num_variations: z.coerce.number().int().min(1).max(5).default(1),
   // escape hatch: skip a row without deleting it
   skip: csvBoolean.default(false),
-})
+}).refine(
+  (r) => Boolean(r.script) || (Boolean(r.description) && Boolean(r.call_to_action)),
+  {
+    message:
+      "description and call_to_action are required unless a script is provided",
+    path: ["call_to_action"],
+  }
+)
 
 export type ProductRow = z.infer<typeof ProductRowSchema>
 
@@ -55,6 +75,7 @@ const HEADER_ALIASES: Record<string, string> = invert({
   product_name: ["product name", "product", "name", "title", "product_name"],
   description: ["description", "desc", "about"],
   call_to_action: ["call to action", "cta", "call_to_action"],
+  script: ["script", "vo", "voiceover", "voice over", "vsl", "talking script"],
   key_benefits: ["key benefits", "benefits", "features", "key_benefits"],
   price: ["price", "cost"],
   target_audience: ["target audience", "audience", "target", "target_audience"],
@@ -63,6 +84,7 @@ const HEADER_ALIASES: Record<string, string> = invert({
   engine: ["engine"],
   avatar_id: ["avatar id", "avatar", "avatar_id"],
   voice_id: ["voice id", "voice", "voice_id"],
+  gender: ["gender", "sex"],
   orientation: ["orientation", "format", "aspect"],
   num_variations: ["num variations", "variations", "num_variations", "count"],
   skip: ["skip", "disabled"],

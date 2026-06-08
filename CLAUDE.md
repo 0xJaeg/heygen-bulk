@@ -11,18 +11,17 @@ videos: a CSV/Google-Sheet of products → Claude writes one promo script per pr
 `README.md` is the usage/reference doc. The approved design/plan is the architectural
 source of truth: `/Users/christianjheggfermilan/.claude/plans/we-will-start-by-playful-galaxy.md`.
 
-**Current state (2026-06-05):** the full pipeline is implemented and unit-tested
-(79 tests) — ingest → script-gen (cached) → HeyGen V2/V3 engine → `node:sqlite`
-ledger → CLI (`dry-run`/`sample`/`approve`/`production`/`resume`) + `index.html`
-review page. A first 4-video sample rendered end-to-end **with audio** (verified).
+**Current state:** the full pipeline is implemented and unit-tested (84 tests) —
+ingest → script-gen (cached) → HeyGen **Avatar IV/V** engine → `node:sqlite` ledger →
+CLI (`dry-run`/`sample`/`approve`/`production`/`resume`) + `index.html` review page.
+Validated end-to-end with audio on Avatar V.
 
-**The one open item:** matching the teammate's *designed look* (background +
-captions). The teammate makes the "real" promos manually in the HeyGen app; the
-account has **0 saved templates** (`GET /v2/templates` → empty). Awaiting their
-exact setup (template vs background image, captions, which avatar/voice). Until
-then the raw `/v2/video/generate` call omits `background`, so output is bare.
-Preferred fix: teammate `Save as Template` → we fill the script text variable via
-`POST /v2/template/{id}/generate`. (Alt: add `background` + `caption` to the V2 call.)
+**Default = Avatar IV/V photo avatars (`iv` engine).** The team chose Avatar V for its
+realism. Photo avatars bring their **own setting baked in**, so there are **no custom
+backgrounds** to manage (the old v2 studio-avatar + composited-background path, its
+framing knobs, and the `backgrounds/` folder were all removed — git history has them if
+ever needed). The only other engine is the opt-in `v3` video-agents (auto-compose,
+unused). Remaining: vet/expand `pools.iv` and wire round-robin for M9 (unique-per-product).
 
 ## Working Style
 
@@ -58,20 +57,28 @@ npx tsx src/cli.ts resume     <runId> --source <csv|url>
 Runs on Node `>=20` (developed on Node 26). `dry-run` needs only `ANTHROPIC_API_KEY`;
 anything that renders also needs `HEYGEN_API_KEY` (`.env` / `.env.local`).
 
+**Operator shortcuts** (for the non-technical teammate — each bakes in
+`--source data/products.csv`): `npm run check` (status) · `preview` (dry-run) ·
+`sample` · `approve -- <id>` · `make` (production) · `pool` (list-pool). The product
+list lives at **`data/products.csv`** (renamed from `examples/`); the one-page runbook
+is **`HANDOFF.md`**.
+
 ## Architecture
 
 Single-process Node/TS CLI. Data flow: **ingest → script (cached) → buildJobSpec →
 engine (create/poll/download) → manifest + ledger**. Modules under `src/`:
 
 - `ingest/` — `loadRows`: local CSV or published-Sheet CSV URL → `csv-parse` → per-row validate.
-- `schema/row.ts` — `ProductRowSchema` (zod) + forgiving header mapping; empty cells → defaults.
+- `schema/row.ts` — `ProductRowSchema` (zod) + forgiving header mapping; empty cells → defaults. Optional `script` column (aliases VO/Voiceover/VSL): if set it's the spoken text used verbatim (Claude skipped) and `description`/`call_to_action` become optional (zod refine requires them only when no script). Optional `gender` (`male`/`female`, also `M`/`F`) selects a matching avatar+voice from the gender-split pool.
 - `script/` — `generate` (Claude `messages.parse` + `zodOutputFormat`), `prompt` (cached system block + `PROMPT_VERSION`), `word-budget` (enforce <60s), `cache` (content-hash → reuse, drift-proof).
-- `heygen/` — `client` (typed REST: V2 create/status, V3 create/session/status, list avatars/voices/templates), `errors` (classify 429/credit/transient/permanent), `engine` (`processJob`/`runJobs`: concurrency cap, backoff polling, retries, credit circuit-breaker, download-on-complete), `download` (stream MP4 to disk).
-- `jobs/build-job.ts` — stable `job_id`, seeded pool rotation, `buildJobSpec` (override → default → rotation).
+- `heygen/` — `client` (typed REST: `createIvVideo` → `/v3/videos`, `getStatusV3` → `/v3/videos/{id}` shared by both engines, V3 video-agents create/session, list avatars/voices/templates), `errors` (classify 429/credit/transient/permanent), `engine` (`processJob`/`runJobs`: concurrency cap, backoff polling, retries, credit circuit-breaker, download-on-complete), `download` (stream MP4 to disk).
+- `jobs/build-job.ts` — stable `job_id`, seeded **gender-aware** pool rotation (avatars/voices split male/female so a row's `gender` picks a matching pair), `buildJobSpec` (override → default → rotation).
 - `store/job-store.ts` — `node:sqlite` ledger (idempotency + resume + cost).
 - `cost/estimate.ts`, `ledger/manifest.ts` (manifest.json + index.html), `orchestrate/` (`run` pipeline + approval `gate`).
 
-Two engines: **V2** (avatar + curated pool, the workhorse) and **V3** (auto-compose, opt-in per row).
+Two engines (per-row `engine`, else `defaults.engine`): **iv** — the **default + workhorse**
+— Avatar IV/V photorealistic **photo avatars** via `POST /v3/videos`; **v3** — opt-in
+auto-compose video-agents (unused). (The old `v2` studio-avatar engine was removed.)
 
 ## Conventions
 
@@ -84,10 +91,12 @@ Two engines: **V2** (avatar + curated pool, the workhorse) and **V3** (auto-comp
 ## Gotchas (project-specific)
 
 - **`node:sqlite`, NOT `better-sqlite3`** — `better-sqlite3` fails to compile on Node 26 (no prebuilt binary). The built-in needs no native build. `JobStore` `mkdir`s its parent dir before opening.
-- **HeyGen V2 needs a `background`** — omitting it renders a bare default (current open item). Download URLs **expire (~7 days)** → the engine downloads on completion. The V2 status path is a **config constant** (`heygen.statusPathV2`) because docs show variants.
+- **Download URLs expire (~7 days)** → the engine downloads each MP4 on completion; never store the signed `video_url` for later.
+- **Avatar IV/V (`iv` engine, the default) = photo avatars, a different paradigm.** `client.createIvVideo` → `POST /v3/videos` `{type:"avatar", avatar_id:<photo-avatar look>, voice_id, script, aspect_ratio, resolution, engine:{type:"avatar_v"|"avatar_iv"}}`; poll the **same** `getStatusV3` (`GET /v3/videos/{id}`). The endpoint is **strict** (rejects unknown fields — `dimension`/`orientation`/`background`-as-string all 400); real engine tags are **`avatar_iv`/`avatar_v`** (NOT the docs' `avatar_4_*`). The photo avatar bakes in its own framing + background (no compositing/framing knobs); output size comes from `aspect_ratio`+`resolution`. Pool: `pools.iv` photo-avatar look ids, **parallel** with their matched default voices (`avatars[g][i]` ↔ `voices[g][i]`; `buildJobSpec` picks a shared index). Discover looks with avatar_iv/avatar_v support via `GET /v3/avatars/looks` (all `photo_avatar`). **Cost: 20 credits/min for BOTH avatar_iv and avatar_v** (HeyGen docs — engine choice doesn't change cost; avatar_v is just ~3× slower to render). Confirm the plan's credit→$ + balance on the dashboard before scale. **avatar_v fits real-human photo avatars (better lip-sync/gestures); avatar_iv suits stylized/non-human.**
 - **Never re-create a job that has a `heygen_video_id`** — the engine re-polls the stored id instead (avoids double charges). `job_id` is a stable hash of product+variation+engine.
 - **Script cache is content-hashed** by `model + promptVersion + grounding fields + variation` — approved QA scripts are reused verbatim and free at scale. Bump `PROMPT_VERSION` when changing the prompt.
-- **Cost**: ≈ $1/min (V2), $2/min (V3); the cost guard warns/`--yes`-gates large runs. `MAX_CONCURRENCY` must match the HeyGen plan's concurrent-generation cap.
+- **Provided scripts bypass Claude** — a row's `script` column (if set) is used verbatim: no generation, no cache, no trim, `num_variations` ignored. Empty → Claude generates as before. So a sheet of all-provided scripts needs no Anthropic calls.
+- **Cost**: Avatar IV/V = **20 HeyGen credits/min** (both tiers; per HeyGen docs); `pricePerMinuteUsd.iv` is a placeholder USD — set from the plan's credit→$. The cost guard warns/`--yes`-gates large runs. `MAX_CONCURRENCY` must match the HeyGen plan's concurrent-generation cap.
 - **Review page**: `index.html` `<video src>` is a **basename** (resolves next to the file in the run dir) — keep it that way.
 
 ## Claude Code Skills

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { createInterface } from "node:readline/promises"
 import { Command } from "commander"
 import { getAnthropic } from "./anthropic.js"
 import { config, type Env, loadEnv } from "./config.js"
@@ -25,6 +26,14 @@ const sleep = (ms: number): Promise<void> =>
 
 function timestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "")
+}
+
+/** Ask a yes/no question on the terminal; returns true only for y / yes. */
+async function confirm(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  const answer = (await rl.question(question)).trim().toLowerCase()
+  rl.close()
+  return answer === "y" || answer === "yes"
 }
 
 function requireHeygen(env: Env): void {
@@ -86,6 +95,10 @@ async function executeRun(
   env: Env
 ): Promise<PipelineResult> {
   const store = new JobStore(config.paths.ledger)
+  const client = new HeyGenClient({
+    apiKey: env.HEYGEN_API_KEY,
+    baseUrl: env.HEYGEN_BASE_URL,
+  })
   try {
     return await runPipeline(
       {
@@ -97,10 +110,7 @@ async function executeRun(
       },
       {
         anthropic: getAnthropic(),
-        client: new HeyGenClient({
-          apiKey: env.HEYGEN_API_KEY,
-          baseUrl: env.HEYGEN_BASE_URL,
-        }),
+        client,
         store,
         cache: new FileScriptCache(join(config.paths.cache, "scripts")),
         download: makeFileDownloader(runDir),
@@ -128,8 +138,16 @@ program
     console.log(`  HeyGen base URL:  ${env.HEYGEN_BASE_URL}`)
     console.log(`  Max concurrency:  ${env.MAX_CONCURRENCY}`)
     console.log(`  Script model:     ${config.models.script}`)
-    console.log(`  V2 pool avatars:  ${config.pools.v2.avatars.length}`)
-    console.log(`  V2 pool voices:   ${config.pools.v2.voices.length}`)
+    console.log(
+      `  Engine:           ${config.defaults.engine}` +
+        (config.defaults.engine === "iv"
+          ? ` (${config.defaults.avatarEngine}, ${config.defaults.resolution})`
+          : "")
+    )
+    const iv = config.pools.iv.avatars
+    const vo = config.pools.iv.voices
+    console.log(`  IV avatars:       ${iv.female.length} female / ${iv.male.length} male`)
+    console.log(`  IV voices:        ${vo.female.length} female / ${vo.male.length} male`)
   })
 
 program
@@ -152,9 +170,13 @@ program
     }
     console.log(`\nVoices (${voices.length}):`)
     for (const v of voices.slice(0, 50)) {
-      console.log(`  ${v.voice_id}${v.name ? `  (${v.name}${v.language ? `, ${v.language}` : ""})` : ""}`)
+      const meta = [v.gender, v.language].filter(Boolean).join(", ")
+      console.log(`  ${v.voice_id}  ${v.name ?? ""}${meta ? ` [${meta}]` : ""}`)
     }
-    console.log("\nAdd the ids you want to src/config.ts → pools.v2.")
+    console.log(
+      "\nFor Avatar IV/V, discover photo-avatar looks via GET /v3/avatars/looks and" +
+        "\nassign them to src/config.ts → pools.iv (by gender, avatar paired with voice)."
+    )
   })
 
 program
@@ -205,7 +227,7 @@ program
       console.log(e.script)
     }
     const videos = plannedVideoCount(rows)
-    const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd.v2)
+    const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd[config.defaults.engine])
     console.log(`\nPlanned: ${videos} videos. Est. HeyGen cost ≈ $${est.toFixed(2)} (~${ASSUMED_SECONDS}s each).`)
     if (result.buildFailures.length) {
       console.log(`${result.buildFailures.length} rows can't build a job — populate the pool in src/config.ts or add per-row avatar/voice.`)
@@ -230,7 +252,46 @@ program
     const { indexPath } = await writeRun(runDir, toManifest(runId, "sample", result))
     printSummary(result)
     console.log(`\nReview the sample: open ${indexPath}`)
-    console.log(`Approve for production:  tsx src/cli.ts approve ${runId}`)
+    console.log(`If it looks good, approve it then make all the videos:`)
+    console.log(`  npm run approve -- ${runId}`)
+    console.log(`  npm run make`)
+  })
+
+program
+  .command("start")
+  .description("One-command run: show the plan + cost, confirm once, then generate all")
+  .option("--source <pathOrUrl>", "CSV path or published Google-Sheet CSV URL", "data/products.csv")
+  .option("--yes", "skip the confirmation prompt (for automation)")
+  .action(async (opts: { source: string; yes?: boolean }) => {
+    const env = loadEnv()
+    requireHeygen(env)
+    const { rows, errors, skipped } = await loadRows(opts.source)
+    reportIngest(rows.length, errors, skipped)
+    if (rows.length === 0) {
+      console.error("No products to generate — check your CSV.")
+      process.exitCode = 1
+      return
+    }
+    const videos = plannedVideoCount(rows)
+    const est = estimateCreditUsd(
+      videos,
+      ASSUMED_SECONDS,
+      config.heygen.pricePerMinuteUsd[config.defaults.engine]
+    )
+    const n = `${videos} video${videos === 1 ? "" : "s"}`
+    console.log(
+      `\nReady to generate ${n} (${config.defaults.avatarEngine}, ${config.defaults.resolution}) — est. cost ≈ $${est.toFixed(2)}.`
+    )
+    if (!opts.yes && !(await confirm(`Generate ${n} for ~$${est.toFixed(2)}? (y/n) `))) {
+      console.log("Cancelled — nothing was generated.")
+      return
+    }
+    const runId = timestamp()
+    const runDir = join(config.paths.outputs, runId)
+    const result = await executeRun(rows, runId, runDir, env)
+    const { indexPath } = await writeRun(runDir, toManifest(runId, "production", result))
+    printSummary(result)
+    console.log(`\nDone. Watch them: open ${indexPath}`)
   })
 
 program
@@ -245,7 +306,7 @@ program
     if (!(await hasApproval(approvalsPath)) && !opts.yes) {
       console.error(
         "Production is blocked: no approved sample run found.\n" +
-          "Run `sample`, review the videos, then `approve <runId>` before production."
+          "Run `npm run sample`, review the videos, then `npm run approve -- <runId>` before `npm run make`."
       )
       process.exitCode = 1
       return
@@ -253,7 +314,7 @@ program
     const { rows, errors, skipped } = await loadRows(opts.source)
     reportIngest(rows.length, errors, skipped)
     const videos = plannedVideoCount(rows)
-    const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd.v2)
+    const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd[config.defaults.engine])
     console.log(`Planned: ${videos} videos. Est. HeyGen cost ≈ $${est.toFixed(2)}.`)
     if (guardLevel(videos, config.costGuard) === "confirm" && !opts.yes) {
       console.error(

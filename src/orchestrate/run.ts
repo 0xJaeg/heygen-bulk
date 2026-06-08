@@ -61,35 +61,42 @@ export async function runPipeline(
   const scriptByJob = new Map<string, PromoScript>()
   const specByJob = new Map<string, JobSpec>()
   const buildFailures: PipelineResult["buildFailures"] = []
+  const seenJobIds = new Set<string>()
 
   for (const row of rows) {
-    for (let v = 0; v < row.num_variations; v++) {
-      const key = scriptCacheKey({
-        model,
-        promptVersion: PROMPT_VERSION,
-        row,
-        variationIndex: v,
-      })
-      const cached = await deps.cache.get(key)
+    // A provided script is used verbatim — no Claude, no auto-variations.
+    const variations = row.script ? 1 : row.num_variations
+    for (let v = 0; v < variations; v++) {
       let script: PromoScript
-      if (cached) {
-        script = { hook: cached.hook, script: cached.script, title: cached.title }
+      if (row.script) {
+        script = { hook: "", script: row.script, title: row.product_name }
       } else {
-        const gen = await generateScript({
+        const key = scriptCacheKey({
+          model,
+          promptVersion: PROMPT_VERSION,
           row,
           variationIndex: v,
-          anthropic: deps.anthropic,
-          model,
-          maxWords: config.scriptWordBudget.max,
         })
-        script = gen.script
-        await deps.cache.put(key, {
-          hook: script.hook,
-          script: script.script,
-          title: script.title,
-          model: gen.model,
-          promptVersion: gen.promptVersion,
-        })
+        const cached = await deps.cache.get(key)
+        if (cached) {
+          script = { hook: cached.hook, script: cached.script, title: cached.title }
+        } else {
+          const gen = await generateScript({
+            row,
+            variationIndex: v,
+            anthropic: deps.anthropic,
+            model,
+            maxWords: config.scriptWordBudget.max,
+          })
+          script = gen.script
+          await deps.cache.put(key, {
+            hook: script.hook,
+            script: script.script,
+            title: script.title,
+            model: gen.model,
+            promptVersion: gen.promptVersion,
+          })
+        }
       }
 
       const built = buildJobSpec({ row, script, variationIndex: v, config })
@@ -101,6 +108,18 @@ export async function runPipeline(
         })
         continue
       }
+      // Guard against two rows resolving to the same job (e.g. duplicate
+      // product_name with no row_id) — otherwise they'd silently collapse to one.
+      if (seenJobIds.has(built.spec.jobId)) {
+        buildFailures.push({
+          productId: built.spec.productId,
+          variationIndex: built.spec.variationIndex,
+          reason:
+            "duplicate id — another row resolves to the same job; give each row a unique row_id (or product_name)",
+        })
+        continue
+      }
+      seenJobIds.add(built.spec.jobId)
       specs.push(built.spec)
       scriptByJob.set(built.spec.jobId, script)
       specByJob.set(built.spec.jobId, built.spec)
@@ -133,7 +152,6 @@ export async function runPipeline(
     download: deps.download,
     sleep: deps.sleep,
     pricePerMinuteUsd: config.heygen.pricePerMinuteUsd,
-    statusPathV2: config.heygen.statusPathV2,
     concurrency: opts.concurrency,
     maxRetries: opts.maxRetries,
   })

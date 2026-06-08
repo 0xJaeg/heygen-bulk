@@ -11,12 +11,14 @@
     "format": "prettier --write \"**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "status": "tsx src/cli.ts status",
-    "list-pool": "tsx src/cli.ts list-pool",
-    "gen:dry": "tsx src/cli.ts dry-run",
-    "gen:sample": "tsx src/cli.ts sample",
-    "gen:production": "tsx src/cli.ts production",
-    "resume": "tsx src/cli.ts resume"
+    "start": "tsx src/cli.ts start",
+    "check": "tsx src/cli.ts status",
+    "pool": "tsx src/cli.ts list-pool",
+    "preview": "tsx src/cli.ts dry-run --source data/products.csv",
+    "sample": "tsx src/cli.ts sample --source data/products.csv --limit 3",
+    "approve": "tsx src/cli.ts approve",
+    "make": "tsx src/cli.ts production --source data/products.csv",
+    "resume": "tsx src/cli.ts resume --source data/products.csv"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",
