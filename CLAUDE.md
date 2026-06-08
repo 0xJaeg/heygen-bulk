@@ -59,6 +59,12 @@ npx tsx src/cli.ts resume     <runId> --source <csv|url>
 Runs on Node `>=20` (developed on Node 26). `dry-run` needs only `ANTHROPIC_API_KEY`;
 anything that renders also needs `HEYGEN_API_KEY` (`.env` / `.env.local`).
 
+**Operator shortcuts** (for the non-technical teammate — each bakes in
+`--source data/products.csv`): `npm run check` (status) · `preview` (dry-run) ·
+`sample` · `approve -- <id>` · `make` (production) · `pool` (list-pool). The product
+list lives at **`data/products.csv`** (renamed from `examples/`); the one-page runbook
+is **`HANDOFF.md`**.
+
 ## Architecture
 
 Single-process Node/TS CLI. Data flow: **ingest → script (cached) → buildJobSpec →
@@ -72,7 +78,9 @@ engine (create/poll/download) → manifest + ledger**. Modules under `src/`:
 - `store/job-store.ts` — `node:sqlite` ledger (idempotency + resume + cost).
 - `cost/estimate.ts`, `ledger/manifest.ts` (manifest.json + index.html), `orchestrate/` (`run` pipeline + approval `gate`).
 
-Two engines: **V2** (avatar + curated pool, the workhorse) and **V3** (auto-compose, opt-in per row).
+Three engines (per-row `engine`, else `defaults.engine`): **iv** — the **default** —
+Avatar IV/V photorealistic **photo avatars** via `POST /v3/videos`; **V2** — studio
+avatar + composited background + framing knobs; **V3** — auto-compose video-agents.
 
 ## Conventions
 
@@ -87,6 +95,7 @@ Two engines: **V2** (avatar + curated pool, the workhorse) and **V3** (auto-comp
 - **`node:sqlite`, NOT `better-sqlite3`** — `better-sqlite3` fails to compile on Node 26 (no prebuilt binary). The built-in needs no native build. `JobStore` `mkdir`s its parent dir before opening.
 - **HeyGen V2 needs a `background`** — supplied from the `backgrounds/` folder (images uploaded via `client.uploadAsset`, cached, rotated) or `pools.v2.backgrounds`; omitting it renders a bare default. Download URLs **expire (~7 days)** → the engine downloads on completion. The V2 status path is a **config constant** (`heygen.statusPathV2`) because docs show variants.
 - **9:16 framing = avatar choice + scale + offset.** Use HeyGen **"(Upper Body)"** looks (the pool ships `Marcus`/`francis` male, `Abigail`/`Aubrey` female) at `defaults.avatarStyle: "normal"` — they're shot as a portrait medium shot (head + torso) that fills the 9:16 **width** with the background edge-to-edge. To fill the **height**: `defaults.avatarScale` (1.6) enlarges the avatar and `defaults.avatarOffset.y` (0.07, **positive = down**, normalized fraction) anchors it lower so the torso runs off the **bottom** edge (no desk/floor gap) while the head keeps headroom. Scale alone can't — a centered avatar crops the head at the top before the bottom fills; offset breaks that symmetry. Values locked via scale-sweep + offset render tests. **Tight landscape studio avatars** (e.g. `Aditya in Blue blazer`) pillarbox in 9:16 and only fill if zoomed hard, cropping to a **"resume" head-and-shoulders** — avoid for portrait. (Pick avatars by previewing `preview_image_url`; `GET /v2/avatars` exposes `avatar_name` — "(Upper Body)" in the name is the signal.) Background images are auto **cover-cropped + gaussian-blurred (`defaults.backgroundBlur`, sigma 10) to the video size via ffmpeg** before upload (`heygen/resize.ts`) — **ffmpeg must be on PATH**; the bg cache key includes a blur tag (`:b<sigma>`) so changing the blur re-uploads.
+- **Avatar IV/V (`iv` engine, the default) = photo avatars, a different paradigm.** `client.createIvVideo` → `POST /v3/videos` `{type:"avatar", avatar_id:<photo-avatar look>, voice_id, script, aspect_ratio, resolution, engine:{type:"avatar_v"|"avatar_iv"}}`; poll the **same** `getStatusV3` (`GET /v3/videos/{id}`). The endpoint is **strict** (rejects unknown fields — `dimension`/`orientation`/`background`-as-string all 400); real engine tags are **`avatar_iv`/`avatar_v`** (NOT the docs' `avatar_4_*`). The photo avatar bakes in its own framing + background, so `iv` ignores `avatarStyle`/`avatarScale`/`avatarOffset`/`backgrounds/` (those stay v2-only); size comes from `aspect_ratio`+`resolution`. Pool: `pools.iv` photo-avatar look ids, **parallel** with their matched default voices (`avatars[g][i]` ↔ `voices[g][i]`; `buildJobSpec` picks a shared index). Discover looks with avatar_iv/avatar_v support via `GET /v3/avatars/looks` (all `photo_avatar`). **Cost: 20 credits/min for BOTH avatar_iv and avatar_v** (HeyGen docs — engine choice doesn't change cost; avatar_v is just ~3× slower to render). Confirm the plan's credit→$ + balance on the dashboard before scale. **avatar_v fits real-human photo avatars (better lip-sync/gestures); avatar_iv suits stylized/non-human.**
 - **Never re-create a job that has a `heygen_video_id`** — the engine re-polls the stored id instead (avoids double charges). `job_id` is a stable hash of product+variation+engine.
 - **Script cache is content-hashed** by `model + promptVersion + grounding fields + variation` — approved QA scripts are reused verbatim and free at scale. Bump `PROMPT_VERSION` when changing the prompt.
 - **Provided scripts bypass Claude** — a row's `script` column (if set) is used verbatim: no generation, no cache, no trim, `num_variations` ignored. Empty → Claude generates as before. So a sheet of all-provided scripts needs no Anthropic calls.

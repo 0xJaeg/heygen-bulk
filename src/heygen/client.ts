@@ -1,6 +1,7 @@
 import { classifyError, HeyGenApiError } from "./errors.js"
 import type {
   Avatar,
+  CreateIvVideoRequest,
   CreateV2Request,
   CreateV3Request,
   Template,
@@ -189,6 +190,24 @@ export class HeyGenClient {
       `/v3/video-agents/${encodeURIComponent(sessionId)}`
     )
     return (env.data as { video_id?: string }).video_id ?? null
+  }
+
+  /**
+   * Create an Avatar IV/V photo-avatar video (POST /v3/videos). Poll its status
+   * with getStatusV3 (same /v3/videos/{id} endpoint). The avatar's own photo
+   * supplies framing + background; output size is set by aspectRatio + resolution.
+   */
+  async createIvVideo(input: CreateIvVideoRequest): Promise<string> {
+    const env = await this.request("POST", "/v3/videos", {
+      type: "avatar",
+      avatar_id: input.avatarId,
+      voice_id: input.voiceId,
+      script: input.script,
+      aspect_ratio: input.aspectRatio,
+      resolution: input.resolution,
+      engine: { type: input.avatarEngine },
+    })
+    return (env.data as { video_id: string }).video_id
   }
 
   async getStatusV3(videoId: string): Promise<VideoStatus> {

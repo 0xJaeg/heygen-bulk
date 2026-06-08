@@ -2,7 +2,9 @@ import "dotenv-flow/config"
 import { z } from "zod/v4"
 import type { Background } from "./heygen/types.js"
 
-export type Engine = "v2" | "v3"
+// "iv" = the Avatar IV/V photo-avatar path (POST /v3/videos); the specific tier
+// (avatar_iv | avatar_v) is set by defaults.avatarEngine.
+export type Engine = "v2" | "v3" | "iv"
 export type Orientation = "portrait" | "landscape" | "square"
 export type Gender = "male" | "female"
 
@@ -24,6 +26,10 @@ export interface AppConfig {
     avatarOffset?: { x: number; y: number }
     /** Gaussian blur sigma applied to background images (depth-of-field look). 0 = off. */
     backgroundBlur?: number
+    /** Avatar IV/V tier for the "iv" engine: "avatar_v" (newest) or "avatar_iv". */
+    avatarEngine?: string
+    /** Output resolution for the "iv" engine: "1080p" | "720p" | "4k". */
+    resolution?: string
     caption?: boolean
   }
   pools: {
@@ -34,6 +40,8 @@ export interface AppConfig {
       backgrounds?: Background[]
     }
     v3: { avatars: Record<Gender, string[]>; voices: Record<Gender, string[]> }
+    /** Photo-avatar look ids + voices for the "iv" (Avatar IV/V) path. */
+    iv: { avatars: Record<Gender, string[]>; voices: Record<Gender, string[]> }
   }
   paths: { outputs: string; cache: string; ledger: string; backgrounds: string }
   costGuard: { warnAboveVideos: number; requireConfirmAboveVideos: number }
@@ -41,7 +49,7 @@ export interface AppConfig {
 }
 
 // Editable knobs + curated pool. Fill avatar/voice IDs after Phase 0 discovery
-// (`npm run list-pool`). Per-row CSV values override these defaults.
+// (`npm run pool`). Per-row CSV values override these defaults.
 export const config: AppConfig = {
   models: {
     script: "claude-haiku-4-5",
@@ -51,16 +59,17 @@ export const config: AppConfig = {
   sampleSize: 3,
   rotation: "hash",
   defaults: {
-    engine: "v2",
+    engine: "iv", // Avatar IV/V photo-avatar path (POST /v3/videos) — photorealistic
+    avatarEngine: "avatar_v", // newest tier; "avatar_iv" is ~3x faster, near-identical quality
+    resolution: "1080p",
     orientation: "portrait",
     numVariations: 1,
     gender: "female",
-    // "(Upper Body)" pool avatars (below) render at "normal" as a natural medium
-    // shot filling the 9:16 width with the background edge-to-edge. avatarScale +
-    // avatarOffset fill the frame *height*: scale (1.6) enlarges the avatar, and a
-    // small downward offset.y (0.07) anchors it lower so the torso runs off the
-    // BOTTOM edge (no desk/floor gap) while the head keeps headroom. Scaling alone
-    // can't — a centered avatar crops the head at the top before the bottom fills.
+    // The avatarStyle/avatarScale/avatarOffset/background* knobs below apply ONLY to
+    // the legacy "v2" studio-avatar path. The default "iv" path ignores them — the
+    // photo avatar brings its own framing + background, sized via aspect_ratio+resolution.
+    // (v2 framing notes: "(Upper Body)" avatars at "normal" fill the 9:16 width;
+    // avatarScale 1.6 + avatarOffset.y 0.07 fill the height without cropping the head.)
     avatarStyle: "normal",
     avatarScale: 1.6,
     avatarOffset: { x: 0, y: 0.07 },
@@ -73,7 +82,7 @@ export const config: AppConfig = {
       avatars: {
         // "(Upper Body)" looks — natural medium-shot framing that fills a 9:16
         // portrait at "normal" style. Swap in the teammate's brand avatars when
-        // available (`npm run list-pool` to discover ids).
+        // available (`npm run pool` to discover ids).
         female: [
           "Abigail_expressive_2024112501", // Abigail (Upper Body)
           "Aubrey_expressive_2024112701", // Aubrey (Upper Body)
@@ -107,6 +116,39 @@ export const config: AppConfig = {
       avatars: { female: [], male: [] },
       voices: { female: [], male: [] },
     },
+    iv: {
+      // HeyGen photo avatars (Avatar IV/V), portrait 1080x1920. avatars[gender][i]
+      // is paired with voices[gender][i] (the avatar's matched default voice) — keep
+      // the arrays parallel. `npm run pool` lists more; swap in brand avatars later.
+      avatars: {
+        female: [
+          "f20cdc89e0ec4b61bbe453d73019a997", // Madison
+          "f594844a5f6c4167b525c9e2f5b07471", // Carolyn
+          "f95484e160dd46d49bd3eff27a70efa0", // Gabrielle
+          "f190ca47077d4d25b1c4d47ee76ef2d1", // Haley
+        ],
+        male: [
+          // Vet photo avatars for props/context before adding — e.g. Nicholas
+          // (cc143447…) was dropped: a news-reporter look holding a mic + TV logo.
+          "fa0e2cddcbb3451cb24faf528ccb51ea", // Archer
+          "fd8a431e7abf4fc5afa7adf79bf993bc", // Sebastian
+          "f43dde9e24a74be5847991a685372dad", // Callum
+        ],
+      },
+      voices: {
+        female: [
+          "9e832936642b4277b639f283915a77e6", // Madison
+          "8b43b00bd7f249ae8fa204b2a51d0f5a", // Carolyn
+          "ca320fd62b784352af74d06a16a6ef3d", // Gabrielle
+          "a3eb48d2cf3e4e02880556644e31bf35", // Haley
+        ],
+        male: [
+          "f6e122316c2543bd891dd5e50044ff60", // Archer
+          "f79b2addf87f46cdaadac019ef24fd23", // Sebastian
+          "be6197b8b1bd4c10a3a37ca72759343d", // Callum
+        ],
+      },
+    },
   },
   paths: {
     outputs: "./outputs",
@@ -121,7 +163,11 @@ export const config: AppConfig = {
     // V2 status path is a config constant — docs show two variants and
     // v2/v3 video paths 404 for v2-created videos. Swap here if it changes.
     statusPathV2: "/v1/video_status.get",
-    pricePerMinuteUsd: { v2: 1, v3: 2 },
+    // HeyGen meters BOTH avatar_iv and avatar_v at 20 credits/min (per HeyGen docs;
+    // engine choice does NOT change cost — avatar_v is just slower to render). iv
+    // USD/min here is a PLACEHOLDER — set it from your plan's credit→$ price, and
+    // confirm actual consumption on the HeyGen dashboard before a big run.
+    pricePerMinuteUsd: { v2: 1, v3: 2, iv: 4 },
   },
 }
 

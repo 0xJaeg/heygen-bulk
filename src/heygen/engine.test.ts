@@ -42,15 +42,16 @@ function deps(client: object, store: JobStore) {
     store,
     download: vi.fn(async () => "/out/p1_0.mp4"),
     sleep: vi.fn(async () => undefined),
-    pricePerMinuteUsd: { v2: 1, v3: 2 },
+    pricePerMinuteUsd: { v2: 1, v3: 2, iv: 4 },
   }
 }
 
 describe("estimateCost", () => {
   it("computes per-second cost by engine", () => {
-    expect(estimateCost("v2", 60, { v2: 1, v3: 2 })).toBe(1)
-    expect(estimateCost("v3", 30, { v2: 1, v3: 2 })).toBe(1)
-    expect(estimateCost("v2", null, { v2: 1, v3: 2 })).toBe(0)
+    expect(estimateCost("v2", 60, { v2: 1, v3: 2, iv: 4 })).toBe(1)
+    expect(estimateCost("v3", 30, { v2: 1, v3: 2, iv: 4 })).toBe(1)
+    expect(estimateCost("iv", 30, { v2: 1, v3: 2, iv: 4 })).toBe(2)
+    expect(estimateCost("v2", null, { v2: 1, v3: 2, iv: 4 })).toBe(0)
   })
 })
 
@@ -119,6 +120,37 @@ describe("processJob", () => {
     expect(rec.status).toBe("completed")
     expect(client.createV2).not.toHaveBeenCalled()
     expect(client.getStatusV2).not.toHaveBeenCalled()
+    store.close()
+  })
+
+  it("submits an iv job via createIvVideo and polls /v3/videos", async () => {
+    const store = new JobStore(":memory:")
+    const createIvVideo = vi.fn(async () => "iv_vid")
+    const getStatusV3 = vi.fn(async () => done())
+    const d = deps({ createIvVideo, getStatusV3 }, store)
+    const rec = await processJob(
+      v2Spec({
+        engine: "iv",
+        avatarId: "look_1",
+        voiceId: "voice_1",
+        aspectRatio: "9:16",
+        resolution: "1080p",
+        avatarEngine: "avatar_v",
+      }),
+      "run1",
+      d
+    )
+    expect(createIvVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        avatarId: "look_1",
+        voiceId: "voice_1",
+        aspectRatio: "9:16",
+        resolution: "1080p",
+        avatarEngine: "avatar_v",
+      })
+    )
+    expect(getStatusV3).toHaveBeenCalledWith("iv_vid")
+    expect(rec.status).toBe("completed")
     store.close()
   })
 

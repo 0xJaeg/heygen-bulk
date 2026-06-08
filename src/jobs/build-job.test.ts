@@ -46,6 +46,10 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
         avatars: { female: [], male: [] },
         voices: { female: [], male: [] },
       },
+      iv: {
+        avatars: { female: ["iv_f1", "iv_f2"], male: ["iv_m1"] },
+        voices: { female: ["ivv_f1", "ivv_f2"], male: ["ivv_m1"] },
+      },
     },
     paths: {
       outputs: "./outputs",
@@ -56,7 +60,7 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
     costGuard: { warnAboveVideos: 50, requireConfirmAboveVideos: 200 },
     heygen: {
       statusPathV2: "/v1/video_status.get",
-      pricePerMinuteUsd: { v2: 1, v3: 2 },
+      pricePerMinuteUsd: { v2: 1, v3: 2, iv: 4 },
     },
     ...over,
   }
@@ -101,6 +105,35 @@ describe("buildJobSpec", () => {
     }
   })
 
+  it("builds an iv spec: paired avatar+voice, aspect/resolution, no v2 framing", () => {
+    const config = makeConfig({
+      defaults: {
+        engine: "iv",
+        orientation: "portrait",
+        numVariations: 1,
+        gender: "female",
+        avatarEngine: "avatar_v",
+        resolution: "1080p",
+      },
+    })
+    const r = buildJobSpec({ row: baseRow, script, variationIndex: 0, config })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.spec.engine).toBe("iv")
+      expect(config.pools.iv.avatars.female).toContain(r.spec.avatarId)
+      // avatar[i] is paired with voice[i]
+      const i = config.pools.iv.avatars.female.indexOf(r.spec.avatarId!)
+      expect(r.spec.voiceId).toBe(config.pools.iv.voices.female[i])
+      expect(r.spec.aspectRatio).toBe("9:16")
+      expect(r.spec.resolution).toBe("1080p")
+      expect(r.spec.avatarEngine).toBe("avatar_v")
+      // v2-only framing knobs are omitted on the iv path
+      expect(r.spec.background).toBeUndefined()
+      expect(r.spec.avatarScale).toBeUndefined()
+      expect(r.spec.avatarOffset).toBeUndefined()
+    }
+  })
+
   it("honors per-row overrides", () => {
     const row: ProductRow = {
       ...baseRow,
@@ -132,6 +165,10 @@ describe("buildJobSpec", () => {
           avatars: { female: [], male: [] },
           voices: { female: [], male: [] },
         },
+        iv: {
+          avatars: { female: [], male: [] },
+          voices: { female: [], male: [] },
+        },
       },
     })
     const r = buildJobSpec({ row: baseRow, script, variationIndex: 0, config })
@@ -149,6 +186,10 @@ describe("buildJobSpec", () => {
           formats: ["portrait"],
         },
         v3: {
+          avatars: { female: [], male: [] },
+          voices: { female: [], male: [] },
+        },
+        iv: {
           avatars: { female: [], male: [] },
           voices: { female: [], male: [] },
         },
@@ -176,6 +217,10 @@ describe("buildJobSpec", () => {
           backgrounds: [{ type: "color", value: "#101820" }],
         },
         v3: {
+          avatars: { female: [], male: [] },
+          voices: { female: [], male: [] },
+        },
+        iv: {
           avatars: { female: [], male: [] },
           voices: { female: [], male: [] },
         },

@@ -30,6 +30,10 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
         avatars: { female: [], male: [] },
         voices: { female: [], male: [] },
       },
+      iv: {
+        avatars: { female: [], male: [] },
+        voices: { female: [], male: [] },
+      },
     },
     paths: {
       outputs: "./outputs",
@@ -40,7 +44,7 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
     costGuard: { warnAboveVideos: 50, requireConfirmAboveVideos: 200 },
     heygen: {
       statusPathV2: "/v1/video_status.get",
-      pricePerMinuteUsd: { v2: 1, v3: 2 },
+      pricePerMinuteUsd: { v2: 1, v3: 2, iv: 4 },
     },
     ...over,
   }
@@ -196,6 +200,10 @@ describe("runPipeline", () => {
           formats: ["portrait"],
         },
         v3: {
+          avatars: { female: [], male: [] },
+          voices: { female: [], male: [] },
+        },
+        iv: {
           avatars: { female: [], male: [] },
           voices: { female: [], male: [] },
         },

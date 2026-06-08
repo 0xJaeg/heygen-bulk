@@ -99,20 +99,24 @@ async function executeRun(
     baseUrl: env.HEYGEN_BASE_URL,
   })
   try {
-    const backgrounds = await loadBackgrounds({
-      dir: config.paths.backgrounds,
-      client,
-      cachePath: join(config.paths.cache, "backgrounds.json"),
-      target: orientationDims(config.defaults.orientation),
-      resize: (bytes, w, h) =>
-        ffmpegCoverResize(bytes, w, h, config.defaults.backgroundBlur),
-      processTag: `:b${config.defaults.backgroundBlur ?? 0}`,
-    })
-    if (backgrounds.length > 0) {
-      config.pools.v2.backgrounds = backgrounds
-      console.log(
-        `Using ${backgrounds.length} background image(s) from ${config.paths.backgrounds}/`
-      )
+    // Composited backgrounds are a v2-only feature; iv photo avatars and v3 agents
+    // bring their own scene, so skip the upload entirely on those paths.
+    if (config.defaults.engine === "v2") {
+      const backgrounds = await loadBackgrounds({
+        dir: config.paths.backgrounds,
+        client,
+        cachePath: join(config.paths.cache, "backgrounds.json"),
+        target: orientationDims(config.defaults.orientation),
+        resize: (bytes, w, h) =>
+          ffmpegCoverResize(bytes, w, h, config.defaults.backgroundBlur),
+        processTag: `:b${config.defaults.backgroundBlur ?? 0}`,
+      })
+      if (backgrounds.length > 0) {
+        config.pools.v2.backgrounds = backgrounds
+        console.log(
+          `Using ${backgrounds.length} background image(s) from ${config.paths.backgrounds}/`
+        )
+      }
     }
     return await runPipeline(
       {
@@ -152,10 +156,16 @@ program
     console.log(`  HeyGen base URL:  ${env.HEYGEN_BASE_URL}`)
     console.log(`  Max concurrency:  ${env.MAX_CONCURRENCY}`)
     console.log(`  Script model:     ${config.models.script}`)
+    console.log(
+      `  Engine:           ${config.defaults.engine}` +
+        (config.defaults.engine === "iv"
+          ? ` (${config.defaults.avatarEngine}, ${config.defaults.resolution})`
+          : "")
+    )
+    const iv = config.pools.iv.avatars
+    console.log(`  IV avatars:       ${iv.female.length} female / ${iv.male.length} male`)
     const av = config.pools.v2.avatars
-    const vo = config.pools.v2.voices
     console.log(`  V2 avatars:       ${av.female.length} female / ${av.male.length} male`)
-    console.log(`  V2 voices:        ${vo.female.length} female / ${vo.male.length} male`)
   })
 
 program
@@ -234,7 +244,7 @@ program
       console.log(e.script)
     }
     const videos = plannedVideoCount(rows)
-    const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd.v2)
+    const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd[config.defaults.engine])
     console.log(`\nPlanned: ${videos} videos. Est. HeyGen cost ≈ $${est.toFixed(2)} (~${ASSUMED_SECONDS}s each).`)
     if (result.buildFailures.length) {
       console.log(`${result.buildFailures.length} rows can't build a job — populate the pool in src/config.ts or add per-row avatar/voice.`)
@@ -259,7 +269,9 @@ program
     const { indexPath } = await writeRun(runDir, toManifest(runId, "sample", result))
     printSummary(result)
     console.log(`\nReview the sample: open ${indexPath}`)
-    console.log(`Approve for production:  tsx src/cli.ts approve ${runId}`)
+    console.log(`If it looks good, approve it then make all the videos:`)
+    console.log(`  npm run approve -- ${runId}`)
+    console.log(`  npm run make`)
   })
 
 program
@@ -274,7 +286,7 @@ program
     if (!(await hasApproval(approvalsPath)) && !opts.yes) {
       console.error(
         "Production is blocked: no approved sample run found.\n" +
-          "Run `sample`, review the videos, then `approve <runId>` before production."
+          "Run `npm run sample`, review the videos, then `npm run approve -- <runId>` before `npm run make`."
       )
       process.exitCode = 1
       return
@@ -282,7 +294,7 @@ program
     const { rows, errors, skipped } = await loadRows(opts.source)
     reportIngest(rows.length, errors, skipped)
     const videos = plannedVideoCount(rows)
-    const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd.v2)
+    const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd[config.defaults.engine])
     console.log(`Planned: ${videos} videos. Est. HeyGen cost ≈ $${est.toFixed(2)}.`)
     if (guardLevel(videos, config.costGuard) === "confirm" && !opts.yes) {
       console.error(

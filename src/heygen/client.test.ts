@@ -115,6 +115,31 @@ describe("HeyGenClient.createV2", () => {
   })
 })
 
+describe("HeyGenClient.createIvVideo", () => {
+  it("posts an Avatar IV/V request to /v3/videos and returns video_id", async () => {
+    const { client, calls } = makeClient(() => ({
+      body: { data: { video_id: "iv_1" } },
+    }))
+    const id = await client.createIvVideo({
+      avatarId: "look_1",
+      voiceId: "voice_1",
+      script: "Hi",
+      aspectRatio: "9:16",
+      resolution: "1080p",
+      avatarEngine: "avatar_v",
+    })
+    expect(id).toBe("iv_1")
+    expect(calls[0]!.url).toBe("https://api.test/v3/videos")
+    const body = JSON.parse(calls[0]!.init.body!)
+    expect(body.type).toBe("avatar")
+    expect(body.avatar_id).toBe("look_1")
+    expect(body.voice_id).toBe("voice_1")
+    expect(body.aspect_ratio).toBe("9:16")
+    expect(body.resolution).toBe("1080p")
+    expect(body.engine).toEqual({ type: "avatar_v" })
+  })
+})
+
 describe("HeyGenClient.getStatusV2", () => {
   it("normalizes a completed status", async () => {
     const { client, calls } = makeClient(() => ({

@@ -8,7 +8,7 @@ describe("isUrl", () => {
   it("distinguishes URLs from file paths", () => {
     expect(isUrl("https://docs.google.com/spreadsheets/d/x/gviz/tq")).toBe(true)
     expect(isUrl("http://example.com/data.csv")).toBe(true)
-    expect(isUrl("./examples/products.with-scripts.csv")).toBe(false)
+    expect(isUrl("./data/products.csv")).toBe(false)
     expect(isUrl("/abs/path/products.csv")).toBe(false)
   })
 })

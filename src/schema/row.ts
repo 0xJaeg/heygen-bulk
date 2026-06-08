@@ -1,6 +1,6 @@
 import { z } from "zod/v4"
 
-export const ENGINES = ["v2", "v3"] as const
+export const ENGINES = ["v2", "v3", "iv"] as const
 export const ORIENTATIONS = ["portrait", "landscape", "square"] as const
 export const TONES = [
   "energetic",

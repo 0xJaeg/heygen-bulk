@@ -34,9 +34,11 @@ CSV / published Google-Sheet
   budget (prompt → one corrective retry → deterministic sentence-boundary trim).
   They're **cached by a content hash**, so the scripts you approve at QA are reused
   **verbatim and free** at scale, and re-runs never re-pay.
-- **Two engines**: **V2** (`/v2/video/generate`) renders a chosen avatar+voice from
-  a curated pool — controllable and cheap, the workhorse. **V3** (`/v3/video-agents`)
-  auto-composes from a prompt — opt-in per row.
+- **Three engines** (per-row `engine`, else `defaults.engine`): **`iv`** — the
+  **default** — renders photorealistic **Avatar IV/V photo avatars** (`/v3/videos`;
+  the avatar brings its own setting); **V2** (`/v2/video/generate`) renders a studio
+  avatar+voice from a curated pool over a composited background; **V3**
+  (`/v3/video-agents`) auto-composes from a prompt. `iv` is premium-priced (see Cost).
 - **The engine** is idempotent and resumable: a stable `job_id` and a `node:sqlite`
   ledger mean a crash never double-charges (it re-polls an existing HeyGen video id
   instead of re-creating). Capped concurrency, backoff polling, retries, and a
@@ -74,18 +76,20 @@ falls back to the `pools.v2.backgrounds` placeholder color.
 
 ## Commands
 
-Run any command with `npx tsx src/cli.ts <command>` (npm shortcuts noted):
+Run any command with `npx tsx src/cli.ts <command>`. The `npm run` shortcuts (in
+parens) bake in `--source data/products.csv` for the everyday flow — that's all a
+non-technical operator needs (see `HANDOFF.md`).
 
 | Command | What it does |
 |---|---|
-| `status` | Validate env + print effective config. (`npm run status`) |
-| `list-pool` | List HeyGen avatars + voices (to fill `config.pools`). (`npm run list-pool`) |
+| `status` | Validate env + print effective config. (`npm run check`) |
+| `list-pool` | List HeyGen avatars + voices (to fill `config.pools`). (`npm run pool`) |
 | `list-templates` | List saved HeyGen templates. |
-| `dry-run --source <csv\|url>` | Validate rows + generate scripts + estimate cost. **No video spend.** (`npm run gen:dry -- --source …`) |
-| `sample --source <csv\|url> [--limit N]` | Render a small QA batch (default `config.sampleSize`) into `outputs/<run>__SAMPLE/`. |
-| `approve <runId>` | Approve a sample run so production can proceed. |
-| `production --source <csv\|url> [--yes]` | Render all eligible rows. Blocked until a sample is approved; `--yes` bypasses the cost-guard confirmation. |
-| `resume <runId> --source <csv\|url>` | Re-run a run id; completed jobs are skipped, in-flight ones re-polled. |
+| `dry-run --source <csv\|url>` | Validate rows + generate scripts + estimate cost. **No video spend.** (`npm run preview`) |
+| `sample --source <csv\|url> [--limit N]` | Render a small QA batch (default `config.sampleSize`) into `outputs/<run>__SAMPLE/`. (`npm run sample`) |
+| `approve <runId>` | Approve a sample run so production can proceed. (`npm run approve -- <runId>`) |
+| `production --source <csv\|url> [--yes]` | Render all eligible rows. Blocked until a sample is approved; `--yes` bypasses the cost-guard confirmation. (`npm run make`) |
+| `resume <runId> --source <csv\|url>` | Re-run a run id; completed jobs are skipped, in-flight ones re-polled. (`npm run resume -- <runId>`) |
 
 ---
 
@@ -93,29 +97,30 @@ Run any command with `npx tsx src/cli.ts <command>` (npm shortcuts noted):
 
 ```bash
 # 1. Preview scripts + cost, no spend
-npx tsx src/cli.ts dry-run --source examples/products.with-scripts.csv
+npm run preview
 
 # 2. Render a few real videos, review the index.html it prints
-npx tsx src/cli.ts sample --source examples/products.with-scripts.csv --limit 3
+npm run sample
 
-# 3. Approve, then go to production
-npx tsx src/cli.ts approve <runId>
-npx tsx src/cli.ts production --source path/to/products.csv
+# 3. Approve the reviewed run, then make all of them
+npm run approve -- <runId>
+npm run make
 
 # Resume after an interruption (no double charges)
-npx tsx src/cli.ts resume <runId> --source path/to/products.csv
+npm run resume -- <runId>
 ```
 
-`--source` is a local CSV path **or** a published Google-Sheet CSV URL
-(`File → Share → Publish to web → CSV`). Both flow through the same parser.
+These shortcuts read `data/products.csv`. To point at a different file or a
+**published Google-Sheet CSV URL** (`File → Share → Publish to web → CSV`), call the
+CLI directly with `--source <pathOrUrl>` (same parser for files and Sheet URLs).
 
 ---
 
 ## Input CSV
 
 Headers are **flexible** — a forgiving mapper handles `Product Name`, `CTA`,
-`Benefits`, etc. Empty cells fall back to defaults. See
-`examples/products.with-scripts.csv` for an example (pre-written scripts + gender).
+`Benefits`, etc. Empty cells fall back to defaults. The file you edit is
+`data/products.csv`, pre-loaded with example rows (pre-written scripts + gender).
 
 | Column | Required | Notes |
 |---|---|---|
@@ -128,7 +133,7 @@ Headers are **flexible** — a forgiving mapper handles `Product Name`, `CTA`,
 | `target_audience` | — | |
 | `tone` | — | `energetic`(default)`/professional/friendly/luxury/playful` |
 | `language` | — | default `en` |
-| `engine` | — | `v2`(default)`/v3` — per-row override |
+| `engine` | — | `iv`(default — Avatar IV/V photo avatars)`/v2/v3` — per-row override |
 | `gender` | — | `male`/`female` (also `M`/`F`). Picks a matching avatar **and** voice from the gender pool. Default configurable. |
 | `avatar_id` | — | per-row override (else gendered pool rotation) |
 | `voice_id` | — | per-row override (else pool rotation) |
@@ -149,7 +154,9 @@ Editable knobs (secrets stay in `.env`). Per-row CSV values override these.
 | `scriptWordBudget` | `{ target: 130, max: 140 }` — the <60s guarantee |
 | `sampleSize` | default `--sample` size |
 | `defaults` | `{ engine, orientation, numVariations }` |
-| `pools.v2` / `pools.v3` | `{ avatars: {male,female}, voices: {male,female}, formats[] }` — gender-split rotation pools |
+| `pools.iv` | `{ avatars, voices }` photo-avatar look ids + matched default voices (gender-split, **parallel** arrays — `avatars[g][i]` ↔ `voices[g][i]`) for the default `iv` engine |
+| `pools.v2` / `pools.v3` | `{ avatars: {male,female}, voices: {male,female}, formats[] }` — gender-split rotation pools (v2 also `backgrounds[]`) |
+| `defaults.avatarEngine` / `defaults.resolution` | `iv` tier (`avatar_v`/`avatar_iv`) + output (`1080p`/`720p`/`4k`) |
 | `defaults.gender` | `male`/`female` used when a row omits `gender` |
 | `defaults.avatarStyle` | HeyGen framing: `normal` (default — natural medium shot with "(Upper Body)" avatars) or `closeUp` (tighter head-and-shoulders) |
 | `defaults.avatarScale` | Avatar zoom (`1` = native). `1.6` makes the avatar taller so it fills the 9:16 height (no desk/floor gap below); lower leaves a gap, higher trims headroom |
@@ -176,11 +183,15 @@ All of the above are gitignored.
 
 ## Cost model
 
-HeyGen bills per **second of video** — ≈ **$1/min V2**, **$2/min V3**. A ~41s promo
-≈ **$0.68 (V2)**. At 200–400/day that's **~$135–270/day ≈ $4–8k/month** on V2.
-Claude script tokens are negligible (single-digit dollars/month). The cost guard
-warns above `warnAboveVideos` and requires `--yes` above `requireConfirmAboveVideos`;
-per-video credits are recorded in the ledger and manifest.
+HeyGen bills by **HeyGen credits**. The default **`iv` (Avatar IV/V)** engine costs
+**20 credits/min** — and **both `avatar_iv` and `avatar_v` are the same price** (per
+HeyGen docs); `avatar_v` is just ~3× slower to render. At 200–400/day that is still a
+meaningful credit spend, so **confirm your plan's credit allowance + credit→$ price**
+(check `GET /v2/user/remaining_quota`, or the dashboard) before a production run.
+`defaults.heygen.pricePerMinuteUsd.iv` is a **placeholder** — set it from your plan's
+credit price. Claude script tokens are negligible. The cost guard warns above
+`warnAboveVideos` and requires `--yes` above `requireConfirmAboveVideos`; per-video
+credits are recorded in the ledger + manifest.
 
 ## Troubleshooting
 
@@ -237,6 +248,7 @@ src/
   cost/estimate.ts       # video count + cost estimate + guard level
   ledger/manifest.ts     # manifest.json + index.html review page
   orchestrate/           # run pipeline + approval gate
-examples/                # sample product CSVs
+data/products.csv        # the product list the operator edits (starter rows included)
 backgrounds/             # drop scene images here (uploaded to HeyGen once, rotated)
+HANDOFF.md               # one-page runbook for a non-technical operator
 ```
