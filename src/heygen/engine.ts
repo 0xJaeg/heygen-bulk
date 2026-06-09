@@ -12,6 +12,8 @@ export interface EngineDeps {
   download: (url: string, basename: string) => Promise<string>
   sleep: (ms: number) => Promise<void>
   pricePerMinuteUsd: { v3: number; iv: number }
+  /** Called once per job as it reaches a terminal state (for live progress). */
+  onEvent?: (rec: JobRecord, settled: number, total: number) => void
   poll?: {
     base?: number
     factor?: number
@@ -165,11 +167,16 @@ export async function runJobs(
   const records: JobRecord[] = []
   let creditExhausted = false
 
+  const settle = (rec: JobRecord): void => {
+    records.push(rec)
+    deps.onEvent?.(rec, records.length, specs.length)
+  }
+
   const runOne = async (spec: JobSpec): Promise<void> => {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (creditExhausted) return
       try {
-        records.push(await processJob(spec, runId, deps))
+        settle(await processJob(spec, runId, deps))
         return
       } catch (e) {
         const kind = e instanceof HeyGenApiError ? e.kind : "transient"
@@ -188,7 +195,7 @@ export async function runJobs(
           failure: (e as Error).message,
         })
         const rec = deps.store.get(spec.jobId)
-        if (rec) records.push(rec)
+        if (rec) settle(rec)
         return
       }
     }

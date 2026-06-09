@@ -51,7 +51,7 @@ CSV / published Google-Sheet
 
 ```bash
 npm install
-cp .env.example .env.local      # set ANTHROPIC_API_KEY and HEYGEN_API_KEY
+cp .env.example .env.local      # set HEYGEN_API_KEY (ANTHROPIC_API_KEY only if rows lack a script)
 ```
 
 Curate the **photo-avatar pool** in `src/config.ts → pools.iv` — gender-split look ids,
@@ -65,8 +65,9 @@ npx tsx src/cli.ts status           # confirm env + effective config (engine, po
 npx tsx src/cli.ts list-pool        # browse HeyGen avatars + voices
 ```
 
-> `dry-run` only needs `ANTHROPIC_API_KEY`; everything that renders also needs
-> `HEYGEN_API_KEY`. Either `.env` or `.env.local` works (loaded via dotenv-flow).
+> `HEYGEN_API_KEY` is required to render. `ANTHROPIC_API_KEY` is **optional** — only
+> needed to write a script for a row that has no `script` cell; an all-provided-script
+> sheet needs no Anthropic key. Either `.env` or `.env.local` works (dotenv-flow).
 
 ---
 

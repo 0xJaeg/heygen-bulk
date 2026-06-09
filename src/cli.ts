@@ -49,6 +49,21 @@ function reportIngest(valid: number, errors: RowError[], skipped: number): void 
   }
 }
 
+/**
+ * True (and prints an error) when rows need a *generated* script (no `script`
+ * cell) but no ANTHROPIC_API_KEY is set. Provided-script rows need no key.
+ */
+function blockedOnMissingAnthropic(rows: ProductRow[], env: Env): boolean {
+  const needGen = rows.filter((r) => !r.script).length
+  if (needGen === 0 || env.ANTHROPIC_API_KEY) return false
+  console.error(
+    `${needGen} row(s) have no \`script\` and need Claude to write one, but ANTHROPIC_API_KEY isn't set.\n` +
+      "Add a `script` to every row (no Anthropic key needed), or set ANTHROPIC_API_KEY in .env."
+  )
+  process.exitCode = 1
+  return true
+}
+
 function printSummary(result: PipelineResult): void {
   const { totals, buildFailures, creditExhausted } = result
   console.log(
@@ -115,10 +130,72 @@ async function executeRun(
         cache: new FileScriptCache(join(config.paths.cache, "scripts")),
         download: makeFileDownloader(runDir),
         sleep,
+        onEvent: (rec, settled, total) => {
+          const ok = rec.status === "completed"
+          const tail = ok
+            ? rec.duration_sec
+              ? ` (${rec.duration_sec}s)`
+              : ""
+            : " — failed"
+          console.log(`  ${ok ? "✓" : "✗"} [${settled}/${total}] ${rec.title ?? rec.product_id}${tail}`)
+        },
       }
     )
   } finally {
     store.close()
+  }
+}
+
+/** Dry-run pass: scripts + presenter assignment for a preview, no HeyGen spend. */
+async function planRun(rows: ProductRow[], env: Env): Promise<PipelineResult> {
+  const store = new JobStore(":memory:")
+  try {
+    return await runPipeline(
+      {
+        rows,
+        runId: "plan",
+        config,
+        model: config.models.script,
+        concurrency: env.MAX_CONCURRENCY,
+        dryRun: true,
+      },
+      {
+        anthropic: getAnthropic(),
+        client: new HeyGenClient({ apiKey: "", baseUrl: env.HEYGEN_BASE_URL }),
+        store,
+        cache: new FileScriptCache(join(config.paths.cache, "scripts")),
+        download: async () => "",
+        sleep,
+      }
+    )
+  } finally {
+    store.close()
+  }
+}
+
+/** Show what a run will produce: each video's title, presenter, and script preview. */
+function printPlan(result: PipelineResult): void {
+  const { entries, buildFailures } = result
+  const labels = new Map<string, string>()
+  const presenter = (id: string | null | undefined): string => {
+    if (!id) return "?"
+    if (!labels.has(id)) labels.set(id, String.fromCharCode(65 + labels.size))
+    return labels.get(id)! // A, B, C… — distinct letter per distinct presenter
+  }
+  const CAP = 12
+  console.log("\nHere's what will be generated:")
+  entries.slice(0, CAP).forEach((e, i) => {
+    console.log(`  ${i + 1}. ${e.title ?? e.product_id}  ·  presenter ${presenter(e.avatar_id)}`)
+    const text = (e.script ?? "").replace(/\s+/g, " ").trim()
+    if (text) console.log(`     "${text.length > 72 ? `${text.slice(0, 72)}…` : text}"`)
+  })
+  if (entries.length > CAP) console.log(`  …and ${entries.length - CAP} more`)
+  const distinct = new Set(entries.map((e) => e.avatar_id ?? "")).size
+  console.log(
+    `\n${entries.length} video${entries.length === 1 ? "" : "s"} · ${distinct} distinct presenter${distinct === 1 ? "" : "s"}.`
+  )
+  if (buildFailures.length) {
+    console.log(`(${buildFailures.length} row(s) won't generate — run \`npm run preview\` to see why.)`)
   }
 }
 
@@ -134,6 +211,9 @@ program
   .action(() => {
     const env = loadEnv()
     console.log("✓ Environment OK")
+    console.log(
+      `  Anthropic key:    ${env.ANTHROPIC_API_KEY ? "set" : "(optional — only needed for rows with no script)"}`
+    )
     console.log(`  HeyGen key:       ${env.HEYGEN_API_KEY ? "set" : "(missing)"}`)
     console.log(`  HeyGen base URL:  ${env.HEYGEN_BASE_URL}`)
     console.log(`  Max concurrency:  ${env.MAX_CONCURRENCY}`)
@@ -202,26 +282,8 @@ program
     const env = loadEnv()
     const { rows, errors, skipped } = await loadRows(opts.source)
     reportIngest(rows.length, errors, skipped)
-    const store = new JobStore(":memory:")
-    const result = await runPipeline(
-      {
-        rows,
-        runId: "dry",
-        config,
-        model: config.models.script,
-        concurrency: env.MAX_CONCURRENCY,
-        dryRun: true,
-      },
-      {
-        anthropic: getAnthropic(),
-        client: new HeyGenClient({ apiKey: "", baseUrl: env.HEYGEN_BASE_URL }),
-        store,
-        cache: new FileScriptCache(join(config.paths.cache, "scripts")),
-        download: async () => "",
-        sleep,
-      }
-    )
-    store.close()
+    if (blockedOnMissingAnthropic(rows, env)) return
+    const result = await planRun(rows, env)
     for (const e of result.entries) {
       console.log(`\n— ${e.title ?? e.product_id} [${e.engine}] —`)
       console.log(e.script)
@@ -230,7 +292,10 @@ program
     const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd[config.defaults.engine])
     console.log(`\nPlanned: ${videos} videos. Est. HeyGen cost ≈ $${est.toFixed(2)} (~${ASSUMED_SECONDS}s each).`)
     if (result.buildFailures.length) {
-      console.log(`${result.buildFailures.length} rows can't build a job — populate the pool in src/config.ts or add per-row avatar/voice.`)
+      console.log(`\n${result.buildFailures.length} row(s) won't generate:`)
+      for (const f of result.buildFailures) {
+        console.log(`  • ${f.productId} (variation ${f.variationIndex}): ${f.reason}`)
+      }
     }
   })
 
@@ -246,6 +311,7 @@ program
     const { rows, errors, skipped } = await loadRows(opts.source)
     reportIngest(rows.length, errors, skipped)
     const sampleRows = rows.slice(0, limit)
+    if (blockedOnMissingAnthropic(sampleRows, env)) return
     const runId = timestamp()
     const runDir = join(config.paths.outputs, `${runId}__SAMPLE`)
     const result = await executeRun(sampleRows, runId, runDir, env)
@@ -272,7 +338,18 @@ program
       process.exitCode = 1
       return
     }
-    const videos = plannedVideoCount(rows)
+    if (blockedOnMissingAnthropic(rows, env)) return
+
+    // Preview what will be made (scripts + presenter variety) before any spend.
+    const plan = await planRun(rows, env)
+    if (plan.entries.length === 0) {
+      console.error("Nothing can be generated — run `npm run preview` to see why.")
+      process.exitCode = 1
+      return
+    }
+    printPlan(plan)
+
+    const videos = plan.entries.length
     const est = estimateCreditUsd(
       videos,
       ASSUMED_SECONDS,
@@ -280,18 +357,28 @@ program
     )
     const n = `${videos} video${videos === 1 ? "" : "s"}`
     console.log(
-      `\nReady to generate ${n} (${config.defaults.avatarEngine}, ${config.defaults.resolution}) — est. cost ≈ $${est.toFixed(2)}.`
+      `\nReady to generate ${n} (${config.defaults.avatarEngine} · ${config.defaults.resolution}) — est. cost ≈ $${est.toFixed(2)}.`
     )
-    if (!opts.yes && !(await confirm(`Generate ${n} for ~$${est.toFixed(2)}? (y/n) `))) {
+    console.log("Rendering runs on HeyGen and can take a few minutes per video — that's normal.")
+    if (!opts.yes && !(await confirm(`\nGenerate ${n} for ~$${est.toFixed(2)}? (y/n) `))) {
       console.log("Cancelled — nothing was generated.")
       return
     }
+    console.log(`\nGenerating ${n}… progress shows below as each finishes (safe to leave running):\n`)
     const runId = timestamp()
     const runDir = join(config.paths.outputs, runId)
     const result = await executeRun(rows, runId, runDir, env)
     const { indexPath } = await writeRun(runDir, toManifest(runId, "production", result))
     printSummary(result)
-    console.log(`\nDone. Watch them: open ${indexPath}`)
+    console.log(
+      `\n✅ ${result.totals.completed} video${result.totals.completed === 1 ? "" : "s"} ready in ${runDir}`
+    )
+    console.log(`   Review (click each to play):  open ${indexPath}`)
+    if (result.totals.failed > 0) {
+      console.log(
+        `   ⚠ ${result.totals.failed} didn't render — run \`npm start\` again to retry; finished videos are skipped (not re-charged).`
+      )
+    }
   })
 
 program
@@ -313,6 +400,7 @@ program
     }
     const { rows, errors, skipped } = await loadRows(opts.source)
     reportIngest(rows.length, errors, skipped)
+    if (blockedOnMissingAnthropic(rows, env)) return
     const videos = plannedVideoCount(rows)
     const est = estimateCreditUsd(videos, ASSUMED_SECONDS, config.heygen.pricePerMinuteUsd[config.defaults.engine])
     console.log(`Planned: ${videos} videos. Est. HeyGen cost ≈ $${est.toFixed(2)}.`)
@@ -350,6 +438,7 @@ program
     requireHeygen(env)
     const { rows, errors, skipped } = await loadRows(opts.source)
     reportIngest(rows.length, errors, skipped)
+    if (blockedOnMissingAnthropic(rows, env)) return
     const runDir = join(config.paths.outputs, runId)
     const result = await executeRun(rows, runId, runDir, env)
     await writeRun(runDir, toManifest(runId, "resume", result))

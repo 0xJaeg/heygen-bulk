@@ -42,7 +42,10 @@ export const config: AppConfig = {
   },
   scriptWordBudget: { target: 130, max: 140 },
   sampleSize: 3,
-  rotation: "hash",
+  // round-robin: each video in a run gets the next presenter in its gender pool, so
+  // same-gender videos don't repeat a face until the pool is exhausted. ("hash" =
+  // stable-per-product but may repeat.)
+  rotation: "round-robin",
   defaults: {
     engine: "iv", // Avatar IV/V photo-avatar path (POST /v3/videos) — photorealistic
     avatarEngine: "avatar_v", // newest tier; "avatar_iv" is ~3x faster, near-identical quality
@@ -105,7 +108,9 @@ export const config: AppConfig = {
 }
 
 const EnvSchema = z.object({
-  ANTHROPIC_API_KEY: z.string().min(1, "Missing ANTHROPIC_API_KEY"),
+  // Optional: only needed to *generate* a script for a row that has no `script`.
+  // With provided scripts (the default workflow), no Anthropic key is required.
+  ANTHROPIC_API_KEY: z.string().default(""),
   // Optional here so `dry-run` (scripts only) works without it; commands that
   // call HeyGen check for it explicitly.
   HEYGEN_API_KEY: z.string().default(""),

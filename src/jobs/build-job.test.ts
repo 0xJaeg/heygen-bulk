@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest"
 import type { AppConfig } from "../config.js"
 import type { ProductRow } from "../schema/row.js"
 import type { PromoScript } from "../script/schema.js"
-import { buildJobSpec, pickFromPool, seededIndex, stableJobId } from "./build-job.js"
+import {
+  buildJobSpec,
+  pickFromPool,
+  productKey,
+  seededIndex,
+  stableJobId,
+} from "./build-job.js"
 
 const script: PromoScript = {
   hook: "H",
@@ -53,6 +59,45 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
     ...over,
   }
 }
+
+describe("productKey", () => {
+  it("uses an explicit row_id verbatim when present", () => {
+    expect(productKey({ ...baseRow, row_id: "r1" })).toBe("r1")
+  })
+
+  it("collides for the same name + same provided script (a true duplicate)", () => {
+    const a = productKey({ ...baseRow, script: "Same line." })
+    const b = productKey({ ...baseRow, script: "Same line." })
+    expect(a).toBe(b)
+  })
+
+  it("gives the same name + different provided scripts distinct ids", () => {
+    // 5 testimonials for one product must become 5 videos, not collapse to 1.
+    const a = productKey({ ...baseRow, script: "Testimonial one." })
+    const b = productKey({ ...baseRow, script: "Testimonial two." })
+    expect(a).not.toBe(b)
+  })
+
+  it("distinguishes the same script cast in different genders", () => {
+    // One testimonial, a male and a female read = two videos, not one.
+    const m = productKey({ ...baseRow, script: "Same words.", gender: "male" })
+    const f = productKey({ ...baseRow, script: "Same words.", gender: "female" })
+    expect(m).not.toBe(f)
+  })
+
+  it("still collides for two no-script rows with identical grounding", () => {
+    const noScript: ProductRow = {
+      product_name: "X",
+      description: "same desc",
+      call_to_action: "Buy",
+      tone: "energetic",
+      language: "en",
+      num_variations: 1,
+      skip: false,
+    }
+    expect(productKey(noScript)).toBe(productKey({ ...noScript }))
+  })
+})
 
 describe("stableJobId", () => {
   it("is deterministic and varies by variation and engine", () => {
@@ -150,5 +195,19 @@ describe("buildJobSpec", () => {
     const r = buildJobSpec({ row, script, variationIndex: 0, config: makeConfig() })
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.spec.engine).toBe("v3")
+  })
+
+  it("round-robin: picks the paired avatar+voice at rotationIndex, wrapping the pool", () => {
+    const config = makeConfig({ rotation: "round-robin" })
+    const at = (rotationIndex: number) =>
+      buildJobSpec({ row: baseRow, script, variationIndex: 0, config, rotationIndex })
+    const r0 = at(0)
+    const r1 = at(1)
+    const r2 = at(2) // wraps: 2 % 2 === 0
+    expect(r0.ok && r0.spec.avatarId).toBe("iv_f1")
+    expect(r0.ok && r0.spec.voiceId).toBe("ivv_f1")
+    expect(r1.ok && r1.spec.avatarId).toBe("iv_f2")
+    expect(r1.ok && r1.spec.voiceId).toBe("ivv_f2")
+    expect(r2.ok && r2.spec.avatarId).toBe("iv_f1")
   })
 })

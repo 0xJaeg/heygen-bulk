@@ -200,6 +200,36 @@ describe("runPipeline", () => {
     store.close()
   })
 
+  it("round-robin gives same-gender videos distinct presenters", async () => {
+    const { anthropic, client } = mocks()
+    const store = new JobStore(":memory:")
+    const config = makeConfig({
+      rotation: "round-robin",
+      pools: {
+        v3: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
+        iv: {
+          avatars: { female: ["iv_f1", "iv_f2"], male: [] },
+          voices: { female: ["ivv_f1", "ivv_f2"], male: [] },
+        },
+      },
+    })
+    // three distinct female products (different scripts → distinct job ids) cycle
+    // the 2-avatar pool deterministically: f1, f2, f1 (in row order).
+    const res = await runPipeline(
+      {
+        rows: [row({ script: "One." }), row({ script: "Two." }), row({ script: "Three." })],
+        runId: "run1",
+        config,
+        model: "m",
+        concurrency: 1,
+        dryRun: true,
+      },
+      { anthropic, client, store, cache: fakeCache(), ...io() }
+    )
+    expect(res.entries.map((e) => e.avatar_id)).toEqual(["iv_f1", "iv_f2", "iv_f1"])
+    store.close()
+  })
+
   it("flags a second row that resolves to the same job id (duplicate)", async () => {
     const { anthropic, client } = mocks()
     const store = new JobStore(":memory:")

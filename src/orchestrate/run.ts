@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk"
-import type { AppConfig } from "../config.js"
+import type { AppConfig, Gender } from "../config.js"
 import type { HeyGenClient } from "../heygen/client.js"
 import { runJobs } from "../heygen/engine.js"
 import { buildJobSpec, type JobSpec } from "../jobs/build-job.js"
@@ -9,7 +9,7 @@ import { generateScript } from "../script/generate.js"
 import { PROMPT_VERSION } from "../script/prompt.js"
 import type { PromoScript } from "../script/schema.js"
 import type { ProductRow } from "../schema/row.js"
-import type { JobStore } from "../store/job-store.js"
+import type { JobRecord, JobStore } from "../store/job-store.js"
 
 export interface ScriptCacheLike {
   get(key: string): Promise<CachedScript | null>
@@ -23,6 +23,8 @@ export interface PipelineDeps {
   cache: ScriptCacheLike
   download: (url: string, basename: string) => Promise<string>
   sleep: (ms: number) => Promise<void>
+  /** Called once per job as it reaches a terminal state (for live progress). */
+  onEvent?: (rec: JobRecord, settled: number, total: number) => void
 }
 
 export interface PipelineOptions {
@@ -62,6 +64,10 @@ export async function runPipeline(
   const specByJob = new Map<string, JobSpec>()
   const buildFailures: PipelineResult["buildFailures"] = []
   const seenJobIds = new Set<string>()
+  // Round-robin presenter assignment: a counter per gender hands each pool-rotation
+  // row the next avatar/voice slot, so same-gender videos in a run don't repeat a
+  // presenter. Rows with an explicit avatar override don't consume a slot.
+  const rotationByGender = new Map<Gender, number>()
 
   for (const row of rows) {
     // A provided script is used verbatim — no Claude, no auto-variations.
@@ -99,7 +105,17 @@ export async function runPipeline(
         }
       }
 
-      const built = buildJobSpec({ row, script, variationIndex: v, config })
+      // Reserve the next presenter slot for this gender (round-robin only; rows
+      // with an explicit avatar override keep their own and don't consume a slot).
+      let rotationIndex: number | undefined
+      const engine = row.engine ?? config.defaults.engine
+      if (config.rotation === "round-robin" && engine === "iv" && !row.avatar_id) {
+        const g: Gender = row.gender ?? config.defaults.gender ?? "female"
+        rotationIndex = rotationByGender.get(g) ?? 0
+        rotationByGender.set(g, rotationIndex + 1)
+      }
+
+      const built = buildJobSpec({ row, script, variationIndex: v, config, rotationIndex })
       if (!built.ok) {
         buildFailures.push({
           productId: built.productId,
@@ -154,6 +170,7 @@ export async function runPipeline(
     pricePerMinuteUsd: config.heygen.pricePerMinuteUsd,
     concurrency: opts.concurrency,
     maxRetries: opts.maxRetries,
+    onEvent: deps.onEvent,
   })
 
   const entries: ManifestEntry[] = summary.records.map((rec) => {

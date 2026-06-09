@@ -161,6 +161,28 @@ describe("runJobs", () => {
     store.close()
   })
 
+  it("emits onEvent once per settled job with a running count", async () => {
+    const store = new JobStore(":memory:")
+    const client = {
+      createIvVideo: vi.fn(async () => "vid"),
+      getStatusV3: vi.fn(async () => done()),
+    }
+    const events: Array<{ status: string; settled: number; total: number }> = []
+    const summary = await runJobs(
+      [ivSpec({ jobId: "j1", productId: "p1" }), ivSpec({ jobId: "j2", productId: "p2" })],
+      "run1",
+      {
+        ...deps(client, store),
+        concurrency: 1,
+        onEvent: (rec, settled, total) => events.push({ status: rec.status, settled, total }),
+      }
+    )
+    expect(summary.completed).toBe(2)
+    expect(events.map((e) => e.settled)).toEqual([1, 2])
+    expect(events.every((e) => e.total === 2 && e.status === "completed")).toBe(true)
+    store.close()
+  })
+
   it("circuit-breaks when credits are exhausted", async () => {
     const store = new JobStore(":memory:")
     const client = {

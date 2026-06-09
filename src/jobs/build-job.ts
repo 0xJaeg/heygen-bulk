@@ -40,13 +40,29 @@ const ASPECT: Record<Orientation, string> = {
   square: "1:1",
 }
 
-/** A row's stable identity: explicit row_id, else a hash of its grounding fields. */
+/**
+ * A row's stable identity: explicit row_id, else a hash of everything that changes
+ * the rendered video — the content (product_name + description + provided script)
+ * and who-says-it-how (gender selects the avatar/voice pool; explicit avatar/voice
+ * overrides; orientation sets framing). Engine is folded in by stableJobId.
+ *
+ * Without this, rows that share a product_name — five testimonials for one offer, or
+ * one script cast in both genders — collapse to a single job and the extras are
+ * silently dropped as duplicates. Byte-identical rows still collide, so re-runs stay
+ * idempotent (a completed job isn't re-charged).
+ */
 export function productKey(row: ProductRow): string {
   if (row.row_id) return row.row_id
-  const h = createHash("sha1")
-    .update(`${row.product_name}|${row.description ?? ""}`)
-    .digest("hex")
-    .slice(0, 12)
+  const parts = [
+    row.product_name,
+    row.description ?? "",
+    row.script ?? "",
+    row.gender ?? "",
+    row.orientation ?? "",
+    row.avatar_id ?? "",
+    row.voice_id ?? "",
+  ]
+  const h = createHash("sha1").update(parts.join("|")).digest("hex").slice(0, 12)
   return `p_${h}`
 }
 
@@ -77,16 +93,21 @@ export function pickFromPool<T>(items: readonly T[], seed: string): T | undefine
 
 /**
  * Resolve a product row + script into a HeyGen job spec.
- * Precedence per field: explicit row override -> seeded pool rotation -> config default.
- * Fails (without spending a credit) when an "iv" job has no avatar/voice available.
+ * Precedence per field: explicit row override -> pool rotation -> config default.
+ * Pool rotation is either seeded-by-hash (stable per product, may repeat) or, when
+ * `config.rotation === "round-robin"` and the caller passes a `rotationIndex`, the
+ * next slot in the pool (distinct presenters within a run — the caller owns the
+ * per-gender counter). Fails (no credit spent) when an "iv" job has no avatar/voice.
  */
 export function buildJobSpec(args: {
   row: ProductRow
   script: PromoScript
   variationIndex: number
   config: AppConfig
+  /** Round-robin position among same-gender pool-rotation rows (caller-supplied). */
+  rotationIndex?: number
 }): BuildJobResult {
-  const { row, script, variationIndex, config } = args
+  const { row, script, variationIndex, config, rotationIndex } = args
   const productId = productKey(row)
   const engine: Engine = row.engine ?? config.defaults.engine
   const jobId = stableJobId(productId, variationIndex, engine)
@@ -102,7 +123,13 @@ export function buildJobSpec(args: {
   let avatarId: string | undefined
   let voiceId: string | undefined
   if (isIv) {
-    const i = seededIndex(pool.avatars[gender].length, `${jobId}:iv`)
+    const len = pool.avatars[gender].length
+    let i: number
+    if (config.rotation === "round-robin" && rotationIndex != null) {
+      i = len === 0 ? -1 : rotationIndex % len
+    } else {
+      i = seededIndex(len, `${jobId}:iv`)
+    }
     avatarId = row.avatar_id ?? (i < 0 ? undefined : pool.avatars[gender][i])
     voiceId = row.voice_id ?? (i < 0 ? undefined : pool.voices[gender][i])
   } else {

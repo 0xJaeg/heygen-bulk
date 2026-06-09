@@ -21,7 +21,11 @@ realism. Photo avatars bring their **own setting baked in**, so there are **no c
 backgrounds** to manage (the old v2 studio-avatar + composited-background path, its
 framing knobs, and the `backgrounds/` folder were all removed — git history has them if
 ever needed). The only other engine is the opt-in `v3` video-agents (auto-compose,
-unused). Remaining: vet/expand `pools.iv` and wire round-robin for M9 (unique-per-product).
+unused). **Presenter assignment is round-robin** (`config.rotation: "round-robin"`, the
+default): each video in a run gets the next avatar/voice in its gender pool, so
+same-gender videos don't repeat a presenter until the pool is exhausted (the per-gender
+counter lives in `runPipeline`; `buildJobSpec` takes the `rotationIndex`). Remaining:
+vet/expand `pools.iv` so larger same-gender batches stay varied.
 
 ## Working Style
 
@@ -54,8 +58,10 @@ npx tsx src/cli.ts production --source <csv|url> [--yes]
 npx tsx src/cli.ts resume     <runId> --source <csv|url>
 ```
 
-Runs on Node `>=20` (developed on Node 26). `dry-run` needs only `ANTHROPIC_API_KEY`;
-anything that renders also needs `HEYGEN_API_KEY` (`.env` / `.env.local`).
+Runs on Node `>=20` (developed on Node 26). `HEYGEN_API_KEY` is needed to render
+(`.env` / `.env.local`); `ANTHROPIC_API_KEY` is **optional** — only required to *write*
+a script for a row that has no `script` cell. An all-provided-script sheet (the default
+workflow) needs no Anthropic key, and the CLI errors clearly up front if a row needs one.
 
 **Operator shortcuts** (for the non-technical teammate — each bakes in
 `--source data/products.csv`): `npm run check` (status) · `preview` (dry-run) ·
@@ -72,7 +78,7 @@ engine (create/poll/download) → manifest + ledger**. Modules under `src/`:
 - `schema/row.ts` — `ProductRowSchema` (zod) + forgiving header mapping; empty cells → defaults. Optional `script` column (aliases VO/Voiceover/VSL): if set it's the spoken text used verbatim (Claude skipped) and `description`/`call_to_action` become optional (zod refine requires them only when no script). Optional `gender` (`male`/`female`, also `M`/`F`) selects a matching avatar+voice from the gender-split pool.
 - `script/` — `generate` (Claude `messages.parse` + `zodOutputFormat`), `prompt` (cached system block + `PROMPT_VERSION`), `word-budget` (enforce <60s), `cache` (content-hash → reuse, drift-proof).
 - `heygen/` — `client` (typed REST: `createIvVideo` → `/v3/videos`, `getStatusV3` → `/v3/videos/{id}` shared by both engines, V3 video-agents create/session, list avatars/voices/templates), `errors` (classify 429/credit/transient/permanent), `engine` (`processJob`/`runJobs`: concurrency cap, backoff polling, retries, credit circuit-breaker, download-on-complete), `download` (stream MP4 to disk).
-- `jobs/build-job.ts` — stable `job_id`, seeded **gender-aware** pool rotation (avatars/voices split male/female so a row's `gender` picks a matching pair), `buildJobSpec` (override → default → rotation).
+- `jobs/build-job.ts` — stable `job_id`, **gender-aware** pool rotation (avatars/voices split male/female so a row's `gender` picks a matching pair), `buildJobSpec` (override → pool rotation → default). Rotation is round-robin (caller passes `rotationIndex`) or seeded-by-hash when no index is given.
 - `store/job-store.ts` — `node:sqlite` ledger (idempotency + resume + cost).
 - `cost/estimate.ts`, `ledger/manifest.ts` (manifest.json + index.html), `orchestrate/` (`run` pipeline + approval `gate`).
 
@@ -93,7 +99,7 @@ auto-compose video-agents (unused). (The old `v2` studio-avatar engine was remov
 - **`node:sqlite`, NOT `better-sqlite3`** — `better-sqlite3` fails to compile on Node 26 (no prebuilt binary). The built-in needs no native build. `JobStore` `mkdir`s its parent dir before opening.
 - **Download URLs expire (~7 days)** → the engine downloads each MP4 on completion; never store the signed `video_url` for later.
 - **Avatar IV/V (`iv` engine, the default) = photo avatars, a different paradigm.** `client.createIvVideo` → `POST /v3/videos` `{type:"avatar", avatar_id:<photo-avatar look>, voice_id, script, aspect_ratio, resolution, engine:{type:"avatar_v"|"avatar_iv"}}`; poll the **same** `getStatusV3` (`GET /v3/videos/{id}`). The endpoint is **strict** (rejects unknown fields — `dimension`/`orientation`/`background`-as-string all 400); real engine tags are **`avatar_iv`/`avatar_v`** (NOT the docs' `avatar_4_*`). The photo avatar bakes in its own framing + background (no compositing/framing knobs); output size comes from `aspect_ratio`+`resolution`. Pool: `pools.iv` photo-avatar look ids, **parallel** with their matched default voices (`avatars[g][i]` ↔ `voices[g][i]`; `buildJobSpec` picks a shared index). Discover looks with avatar_iv/avatar_v support via `GET /v3/avatars/looks` (all `photo_avatar`). **Cost: 20 credits/min for BOTH avatar_iv and avatar_v** (HeyGen docs — engine choice doesn't change cost; avatar_v is just ~3× slower to render). Confirm the plan's credit→$ + balance on the dashboard before scale. **avatar_v fits real-human photo avatars (better lip-sync/gestures); avatar_iv suits stylized/non-human.**
-- **Never re-create a job that has a `heygen_video_id`** — the engine re-polls the stored id instead (avoids double charges). `job_id` is a stable hash of product+variation+engine.
+- **Never re-create a job that has a `heygen_video_id`** — the engine re-polls the stored id instead (avoids double charges). `job_id = hash(productKey + variation + engine)`; `productKey` is the row's `row_id`, else a hash of everything that changes the rendered video — product_name + description + **provided script** + **gender** + orientation + avatar/voice overrides. (Hashing only product_name+description silently collapsed rows that share a name but differ by script or gender — e.g. several testimonials for one offer — into one job; the duplicate-id guard then dropped the rest. Give rows a unique `row_id` to be explicit.)
 - **Script cache is content-hashed** by `model + promptVersion + grounding fields + variation` — approved QA scripts are reused verbatim and free at scale. Bump `PROMPT_VERSION` when changing the prompt.
 - **Provided scripts bypass Claude** — a row's `script` column (if set) is used verbatim: no generation, no cache, no trim, `num_variations` ignored. Empty → Claude generates as before. So a sheet of all-provided scripts needs no Anthropic calls.
 - **Cost**: Avatar IV/V = **20 HeyGen credits/min** (both tiers; per HeyGen docs); `pricePerMinuteUsd.iv` is a placeholder USD — set from the plan's credit→$. The cost guard warns/`--yes`-gates large runs. `MAX_CONCURRENCY` must match the HeyGen plan's concurrent-generation cap.

@@ -9,8 +9,9 @@ run one command.
 
 1. Install **Node.js 20+** (`brew install node` on a Mac).
 2. In this project folder, run `npm install`.
-3. Copy `.env.example` to `.env.local` and paste the two API keys
-   (`ANTHROPIC_API_KEY`, `HEYGEN_API_KEY`).
+3. Copy `.env.example` to `.env.local` and paste the `HEYGEN_API_KEY`.
+   (`ANTHROPIC_API_KEY` is only needed if a product row has no script — when you
+   write the script yourself in the sheet, you can skip it.)
 4. Confirm it works: `npm run check` — it prints the effective config.
 
 After that, your day-to-day is just the two steps below.
@@ -28,15 +29,17 @@ product:
 
 | Column | What to put |
 |---|---|
-| `row_id` | A short **unique** id for each row (e.g. `heart`, `open`, `love`). Required whenever rows share a `product_name`. |
-| `product_name` | The product/offer name (can repeat across rows if `row_id` is unique) |
+| `row_id` | *Optional.* A short id (e.g. `heart`, `love`). Only needed to separate two rows that are otherwise identical. |
+| `product_name` | The product/offer name (fine to repeat — see below) |
 | `script` | The exact words the avatar speaks — **keep under ~140 words (≈60s)** |
 | `gender` | `male` or `female` — picks a matching presenter |
 | `orientation` | Leave as `portrait` (TikTok / Reels / Shorts) |
 
-⚠️ **Every row needs its own `row_id`.** If two rows share a `product_name` and have no
-`row_id`, the tool treats them as the same video and only makes one. (You'll see a
-"duplicate id" message if that happens.)
+💡 **One product, many videos is fine.** Rows that share a `product_name` but have a
+**different script** (or a different `gender`) are kept as separate videos automatically
+— ideal for several promos for the same offer. You'll only see a "duplicate" message if
+two rows are *truly identical* (same product, same script, same gender); to keep both,
+give one a `row_id` or change its wording.
 
 Save it — keep the format as **CSV**.
 
@@ -44,17 +47,29 @@ Save it — keep the format as **CSV**.
 ```
 npm start
 ```
-It reads your sheet, then shows something like:
+It reads your sheet, then shows a **plan** before charging anything:
 
-> `Ready to generate 12 videos (avatar_v, 1080p) — est. cost ≈ $32.00.`
-> `Generate 12 videos for ~$32.00? (y/n)`
+> `Here's what will be generated:`
+> `  1. Before and After  ·  presenter A`
+> `     "Before: I couldn't sit in a quiet room…"`
+> `  2. Before and After  ·  presenter B`
+> `     "A year ago my tinnitus was a 7 out of 10…"`
+> `  …`
+> ``
+> `5 videos · 5 distinct presenters.`
+> `Ready to generate 5 videos (avatar_v · 1080p) — est. cost ≈ $16.67.`
+> `Generate 5 videos for ~$16.67? (y/n)`
 
-- Type **`y`** and press Enter → it makes every video and prints a link
-  (`Done. Watch them: open outputs/…/index.html`). Open that file to watch them.
+- Type **`y`** and press Enter → it makes every video. As each one finishes you'll see a
+  line like `✓ [2/5] Before and After (47s)`. When it's done it prints where the files
+  are and a review link — `open outputs/…/index.html` — open that to watch them.
 - Type **`n`** → nothing is made, no charge.
 
-That’s it. (Want to see the scripts + cost **without** making anything? Run
-`npm run preview`.)
+**"presenter A / B / C…"** are different avatars — the tool automatically gives each
+video in a run a distinct presenter so they don't all look the same. Check the plan to
+make sure the scripts and the count look right before you type `y`.
+
+(Want the plan **without** the confirmation step? Run `npm run preview`.)
 
 ---
 
