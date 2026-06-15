@@ -99,11 +99,12 @@ export const config: AppConfig = {
   },
   costGuard: { warnAboveVideos: 50, requireConfirmAboveVideos: 200 },
   heygen: {
-    // HeyGen meters BOTH avatar_iv and avatar_v at 20 credits/min (per HeyGen docs;
-    // engine choice does NOT change cost — avatar_v is just slower to render). iv
-    // USD/min here is a PLACEHOLDER — set it from your plan's credit→$ price, and
-    // confirm actual consumption on the HeyGen dashboard before a big run.
-    pricePerMinuteUsd: { v3: 2, iv: 4 },
+    // USD per minute of rendered video, by engine. Per HeyGen's published API pricing
+    // (PAYG, 2026): `iv` photo avatars (avatar_iv AND avatar_v — same price; V is just
+    // slower to render) ≈ $3/min at 1080p ($4/min at 4K — not reflected here, see
+    // estimateCost); `v3` Video Agent ≈ $2/min. CONFIRM your exact $/min on the HeyGen
+    // dashboard before any large run — pricing moved to USD PAYG in Feb 2026.
+    pricePerMinuteUsd: { v3: 2, iv: 3 },
   },
 }
 

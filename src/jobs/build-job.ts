@@ -62,6 +62,10 @@ export function productKey(row: ProductRow): string {
     row.avatar_id ?? "",
     row.voice_id ?? "",
   ]
+  // Appended only when set, so two same-content rows that differ only by engine tier
+  // (avatar_iv vs avatar_v) stay distinct — while existing CSVs without the column keep
+  // their current job ids (no surprise re-renders).
+  if (row.avatar_engine) parts.push(row.avatar_engine)
   const h = createHash("sha1").update(parts.join("|")).digest("hex").slice(0, 12)
   return `p_${h}`
 }
@@ -116,6 +120,7 @@ export function buildJobSpec(args: {
   const pool = isIv ? config.pools.iv : config.pools.v3
   const gender: Gender = row.gender ?? config.defaults.gender ?? "female"
   const orientation: Orientation = row.orientation ?? config.defaults.orientation
+  const avatarEngine = row.avatar_engine ?? config.defaults.avatarEngine
   const dims = DIMENSIONS[orientation]
 
   // "iv" pairs avatar[i] with its matched voice[i] (parallel arrays); v3 picks
@@ -163,7 +168,7 @@ export function buildJobSpec(args: {
       // Avatar IV/V output controls (iv path only).
       aspectRatio: isIv ? ASPECT[orientation] : undefined,
       resolution: isIv ? config.defaults.resolution : undefined,
-      avatarEngine: isIv ? config.defaults.avatarEngine : undefined,
+      avatarEngine: isIv ? avatarEngine : undefined,
       script: script.script,
       title: script.title,
     },

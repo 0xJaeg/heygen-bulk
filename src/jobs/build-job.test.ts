@@ -211,3 +211,32 @@ describe("buildJobSpec", () => {
     expect(r2.ok && r2.spec.avatarId).toBe("iv_f1")
   })
 })
+
+describe("per-row avatar_engine", () => {
+  it("overrides the config default avatar engine on the spec", () => {
+    // makeConfig default is avatar_v; the row asks for avatar_iv
+    const row: ProductRow = { ...baseRow, avatar_engine: "avatar_iv" }
+    const r = buildJobSpec({ row, script, variationIndex: 0, config: makeConfig() })
+    expect(r.ok && r.spec.avatarEngine).toBe("avatar_iv")
+  })
+
+  it("falls back to the config default when unset", () => {
+    const r = buildJobSpec({ row: baseRow, script, variationIndex: 0, config: makeConfig() })
+    expect(r.ok && r.spec.avatarEngine).toBe("avatar_v")
+  })
+
+  it("leaves productKey byte-identical when avatar_engine is absent (backward-compatible)", () => {
+    expect(productKey(baseRow)).toBe("p_61afbc55254b")
+  })
+
+  it("folds avatar_engine into identity only when set, so IV vs V don't collapse", () => {
+    const iv: ProductRow = { ...baseRow, avatar_engine: "avatar_iv" }
+    const v: ProductRow = { ...baseRow, avatar_engine: "avatar_v" }
+    expect(productKey(iv)).not.toBe(productKey(v))
+    expect(productKey(iv)).not.toBe(productKey(baseRow))
+    // same engine + same content, differ only by avatar_engine → distinct job ids
+    const jiv = buildJobSpec({ row: iv, script, variationIndex: 0, config: makeConfig() })
+    const jv = buildJobSpec({ row: v, script, variationIndex: 0, config: makeConfig() })
+    expect(jiv.ok && jv.ok && jiv.spec.jobId !== jv.spec.jobId).toBe(true)
+  })
+})
