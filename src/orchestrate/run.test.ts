@@ -10,23 +10,18 @@ import { runPipeline } from "./run.js"
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
-    models: { script: "m", qaScript: "m" },
+    models: { script: "m" },
     scriptWordBudget: { target: 130, max: 140 },
     sampleSize: 3,
     rotation: "hash",
     defaults: {
       engine: "iv",
       orientation: "portrait",
-      numVariations: 1,
       gender: "female",
       avatarEngine: "avatar_v",
       resolution: "1080p",
     },
     pools: {
-      v3: {
-        avatars: { female: [], male: [] },
-        voices: { female: [], male: [] },
-      },
       iv: {
         avatars: { female: ["iv_f1"], male: [] },
         voices: { female: ["ivv_f1"], male: [] },
@@ -186,9 +181,7 @@ describe("runPipeline", () => {
     const { anthropic, client } = mocks()
     const store = new JobStore(":memory:")
     const config = makeConfig({
-      pools: {
-        v3: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
-        iv: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
+      pools: {        iv: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
       },
     })
     const res = await runPipeline(
@@ -205,9 +198,7 @@ describe("runPipeline", () => {
     const store = new JobStore(":memory:")
     const config = makeConfig({
       rotation: "round-robin",
-      pools: {
-        v3: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
-        iv: {
+      pools: {        iv: {
           avatars: { female: ["iv_f1", "iv_f2"], male: [] },
           voices: { female: ["ivv_f1", "ivv_f2"], male: [] },
         },

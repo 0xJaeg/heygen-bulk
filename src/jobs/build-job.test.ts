@@ -2,13 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { AppConfig } from "../config.js"
 import type { ProductRow } from "../schema/row.js"
 import type { PromoScript } from "../script/schema.js"
-import {
-  buildJobSpec,
-  pickFromPool,
-  productKey,
-  seededIndex,
-  stableJobId,
-} from "./build-job.js"
+import { buildJobSpec, productKey, seededIndex, stableJobId } from "./build-job.js"
 
 const script: PromoScript = {
   hook: "H",
@@ -27,23 +21,18 @@ const baseRow: ProductRow = {
 
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
-    models: { script: "claude-haiku-4-5", qaScript: "claude-haiku-4-5" },
+    models: { script: "claude-haiku-4-5" },
     scriptWordBudget: { target: 130, max: 140 },
     sampleSize: 3,
     rotation: "hash",
     defaults: {
       engine: "iv",
       orientation: "portrait",
-      numVariations: 1,
       gender: "female",
       avatarEngine: "avatar_v",
       resolution: "1080p",
     },
     pools: {
-      v3: {
-        avatars: { female: [], male: [] },
-        voices: { female: [], male: [] },
-      },
       iv: {
         avatars: { female: ["iv_f1", "iv_f2"], male: ["iv_m1"] },
         voices: { female: ["ivv_f1", "ivv_f2"], male: ["ivv_m1"] },
@@ -108,21 +97,13 @@ describe("stableJobId", () => {
   })
 })
 
-describe("seededIndex / pickFromPool", () => {
-  it("seededIndex is deterministic per seed and −1 for an empty list", () => {
+describe("seededIndex", () => {
+  it("is deterministic per seed and −1 for an empty list", () => {
     const a = seededIndex(3, "seed-1")
     expect(seededIndex(3, "seed-1")).toBe(a)
     expect(a).toBeGreaterThanOrEqual(0)
     expect(a).toBeLessThan(3)
     expect(seededIndex(0, "seed-1")).toBe(-1)
-  })
-
-  it("pickFromPool is deterministic and undefined for an empty pool", () => {
-    const pool = ["x", "y", "z"]
-    const a = pickFromPool(pool, "seed-1")
-    expect(pickFromPool(pool, "seed-1")).toBe(a)
-    expect(pool).toContain(a)
-    expect(pickFromPool([], "seed-1")).toBeUndefined()
   })
 })
 
@@ -180,9 +161,7 @@ describe("buildJobSpec", () => {
 
   it("fails an iv job when the pool is empty and no override is given", () => {
     const config = makeConfig({
-      pools: {
-        v3: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
-        iv: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
+      pools: {        iv: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
       },
     })
     const r = buildJobSpec({ row: baseRow, script, variationIndex: 0, config })
@@ -202,9 +181,7 @@ describe("buildJobSpec", () => {
 
   it("allows a v3 job with an empty pool (agent auto-selects)", () => {
     const config = makeConfig({
-      pools: {
-        v3: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
-        iv: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
+      pools: {        iv: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
       },
     })
     const row: ProductRow = { ...baseRow, engine: "v3" }

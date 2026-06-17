@@ -9,14 +9,13 @@ export type Orientation = "portrait" | "landscape" | "square"
 export type Gender = "male" | "female"
 
 export interface AppConfig {
-  models: { script: string; qaScript: string }
+  models: { script: string }
   scriptWordBudget: { target: number; max: number }
   sampleSize: number
   rotation: "hash" | "round-robin"
   defaults: {
     engine: Engine
     orientation: Orientation
-    numVariations: number
     gender?: Gender
     /** Avatar IV/V tier for the "iv" engine: "avatar_v" (newest) or "avatar_iv". */
     avatarEngine?: string
@@ -24,8 +23,7 @@ export interface AppConfig {
     resolution?: string
   }
   pools: {
-    v3: { avatars: Record<Gender, string[]>; voices: Record<Gender, string[]> }
-    /** Photo-avatar look ids + voices for the "iv" (Avatar IV/V) path. */
+    /** Shared photo-avatar pool (look ids + matched voices) for both engines. */
     iv: { avatars: Record<Gender, string[]>; voices: Record<Gender, string[]> }
   }
   paths: { outputs: string; cache: string; ledger: string }
@@ -38,7 +36,6 @@ export interface AppConfig {
 export const config: AppConfig = {
   models: {
     script: "claude-haiku-4-5",
-    qaScript: "claude-haiku-4-5",
   },
   scriptWordBudget: { target: 130, max: 140 },
   sampleSize: 3,
@@ -54,16 +51,9 @@ export const config: AppConfig = {
     avatarEngine: "avatar_v", // used only by the "iv" engine (avatar_iv ~3x faster)
     resolution: "1080p", // used only by the "iv" engine
     orientation: "portrait",
-    numVariations: 1,
     gender: "female",
   },
   pools: {
-    // v3 (Video Agent) shares the iv photo-avatar pool below — both engines render the
-    // same looks. This block is unused/legacy; leave empty.
-    v3: {
-      avatars: { female: [], male: [] },
-      voices: { female: [], male: [] },
-    },
     iv: {
       // Shared photo-avatar pool for BOTH engines (iv = Avatar IV/V, v3 = Video Agent),
       // portrait. avatars[gender][i] pairs with voices[gender][i] (each look's default

@@ -89,12 +89,6 @@ export function seededIndex(len: number, seed: string): number {
   return n % len
 }
 
-/** Seeded, reproducible choice from a pool. Returns undefined for an empty pool. */
-export function pickFromPool<T>(items: readonly T[], seed: string): T | undefined {
-  const i = seededIndex(items.length, seed)
-  return i < 0 ? undefined : items[i]
-}
-
 /**
  * Resolve a product row + script into a HeyGen job spec.
  * Precedence per field: explicit row override -> pool rotation -> config default.

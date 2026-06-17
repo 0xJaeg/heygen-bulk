@@ -160,12 +160,11 @@ Editable knobs (secrets stay in `.env`). Per-row CSV values override these.
 
 | Key | Purpose |
 |---|---|
-| `models.script` / `models.qaScript` | Claude model(s) for scripts (default `claude-haiku-4-5`) |
+| `models.script` | Claude model for scripts (default `claude-haiku-4-5`) |
 | `scriptWordBudget` | `{ target: 130, max: 140 }` — the <60s guarantee |
 | `sampleSize` | default `--sample` size |
-| `defaults` | `{ engine, orientation, numVariations }` |
+| `defaults` | `{ engine, orientation, gender, avatarEngine, resolution }` |
 | `pools.iv` | `{ avatars, voices }` photo-avatar look ids + matched default voices (gender-split, **parallel** arrays — `avatars[g][i]` ↔ `voices[g][i]`). Shared by **both** engines (v3 + iv). |
-| `pools.v3` | unused/legacy (empty) — both engines render `pools.iv` looks |
 | `defaults.avatarEngine` / `defaults.resolution` | `iv` tier (`avatar_v`/`avatar_iv`) + output (`1080p`/`720p`/`4k`) |
 | `defaults.gender` | `male`/`female` used when a row omits `gender` |
 | `rotation` | `"hash"` (implemented) or `"round-robin"` (planned — for unique-per-product at M9) |

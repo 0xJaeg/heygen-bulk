@@ -28,7 +28,7 @@ git history has it.) **Presenter assignment is round-robin** (`config.rotation:
 "round-robin"`, default): each video gets the next avatar/voice in its gender pool
 (per-gender counter in `runPipeline`; `buildJobSpec` takes `rotationIndex`). Both engines
 share one **photo-avatar pool** (`pools.iv`, ~15 female / 12 male public-stock looks vetted
-via preview; `pools.v3` is unused). Remaining: confirm v3 verbatim fidelity; the team can
+via preview). Remaining: confirm v3 verbatim fidelity; the team can
 add their own uploaded looks by id.
 
 ## Working Style
