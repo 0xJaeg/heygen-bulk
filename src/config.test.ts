@@ -13,8 +13,9 @@ describe("config", () => {
     expect(config.scriptWordBudget.max).toBeLessThanOrEqual(140)
   })
 
-  it("defaults to the Avatar IV/V (iv) engine with a tier + resolution set", () => {
-    expect(config.defaults.engine).toBe("iv")
+  it("defaults to the v3 (Video Agent) engine, with iv tier + resolution kept for per-row iv", () => {
+    expect(config.defaults.engine).toBe("v3")
+    // still set so a per-row `engine: iv` render has a tier + resolution
     expect(config.defaults.avatarEngine).toBe("avatar_v")
     expect(config.defaults.resolution).toBe("1080p")
   })

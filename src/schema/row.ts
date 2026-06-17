@@ -1,6 +1,8 @@
 import { z } from "zod/v4"
 
 export const ENGINES = ["v3", "iv"] as const
+/** Avatar IV/V tier for the "iv" engine (HeyGen `/v3/videos` engine.type). */
+export const AVATAR_ENGINES = ["avatar_iv", "avatar_v"] as const
 export const ORIENTATIONS = ["portrait", "landscape", "square"] as const
 export const TONES = [
   "energetic",
@@ -47,6 +49,8 @@ export const ProductRowSchema = z.object({
   language: z.string().trim().default("en"),
   // per-row engine / render overrides (else defaults + pool rotation)
   engine: z.enum(ENGINES).optional(),
+  // Avatar IV/V tier for the "iv" engine (else config.defaults.avatarEngine).
+  avatar_engine: z.enum(AVATAR_ENGINES).optional(),
   gender: csvGender.optional(),
   avatar_id: z.string().trim().optional(),
   voice_id: z.string().trim().optional(),
@@ -82,6 +86,7 @@ const HEADER_ALIASES: Record<string, string> = invert({
   tone: ["tone", "style"],
   language: ["language", "lang"],
   engine: ["engine"],
+  avatar_engine: ["avatar engine", "avatar_engine", "engine tier", "avatar tier", "avatar model"],
   avatar_id: ["avatar id", "avatar", "avatar_id"],
   voice_id: ["voice id", "voice", "voice_id"],
   gender: ["gender", "sex"],

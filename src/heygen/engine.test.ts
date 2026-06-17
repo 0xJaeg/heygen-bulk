@@ -142,6 +142,21 @@ describe("processJob", () => {
     expect(client.getStatusV3).not.toHaveBeenCalled()
     store.close()
   })
+
+  it("v3: wraps the script in a strict talking-head prompt for createV3", async () => {
+    const store = new JobStore(":memory:")
+    const createV3 = vi.fn(async (_req: { prompt: string }) => "sess_1")
+    const getSessionVideoId = vi.fn(async () => "vid_1")
+    const getStatusV3 = vi.fn(async () => done())
+    const d = deps({ createV3, getSessionVideoId, getStatusV3 }, store)
+    const rec = await processJob(ivSpec({ engine: "v3", script: "Buy now." }), "run1", d)
+    expect(rec.status).toBe("completed")
+    expect(createV3).toHaveBeenCalledTimes(1)
+    const prompt = createV3.mock.calls[0]![0].prompt
+    expect(prompt).toContain("Buy now.")
+    expect(prompt).toMatch(/b-roll|continuous shot/i)
+    store.close()
+  })
 })
 
 describe("runJobs", () => {

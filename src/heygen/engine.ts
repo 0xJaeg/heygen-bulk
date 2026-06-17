@@ -5,6 +5,7 @@ import { backoffMs } from "./backoff.js"
 import type { HeyGenClient } from "./client.js"
 import { HeyGenApiError } from "./errors.js"
 import type { VideoStatus } from "./types.js"
+import { talkingHeadPrompt } from "./v3-prompt.js"
 
 export interface EngineDeps {
   client: HeyGenClient
@@ -49,7 +50,9 @@ async function submit(spec: JobSpec, deps: EngineDeps): Promise<string> {
   }
 
   const sessionId = await deps.client.createV3({
-    prompt: spec.script,
+    // Wrap the script in the strict talking-head directive so the Video Agent renders
+    // a clean spokesperson (no b-roll/infographics), not an auto-composed edit.
+    prompt: talkingHeadPrompt(spec.script),
     avatarId: spec.avatarId,
     voiceId: spec.voiceId,
     orientation: spec.orientation === "landscape" ? "landscape" : "portrait",

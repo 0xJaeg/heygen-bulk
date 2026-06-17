@@ -5,9 +5,11 @@ Claude writes one promo script per product; **HeyGen** renders the video. Design
 to QA a few samples, then scale to ~200–400/day (6–12k/month).
 
 > **Status:** the full pipeline is built and unit-tested, validated end-to-end with
-> audio. The default engine is HeyGen **Avatar IV/V photo avatars** — photorealistic
-> people in their own settings, so there are **no backgrounds to manage**. Pick/curate
-> photo avatars in `src/config.ts → pools.iv`; the operator just edits `data/products.csv`.
+> audio. The default engine is the HeyGen **Video Agent (`v3`)**, auto-constrained to a
+> clean talking-head spokesperson (no b-roll), ~$2/min; set a row's `engine` to **`iv`**
+> for an Avatar IV/V photo-avatar render with a **guaranteed-verbatim** script (~$3/min).
+> Both share the photo-avatar pool in `src/config.ts → pools.iv`; the operator just edits
+> `data/products.csv`.
 
 ---
 
@@ -33,11 +35,13 @@ CSV / published Google-Sheet
   budget (prompt → one corrective retry → deterministic sentence-boundary trim).
   They're **cached by a content hash**, so the scripts you approve at QA are reused
   **verbatim and free** at scale, and re-runs never re-pay.
-- **Engines** (per-row `engine`, else `defaults.engine`): **`iv`** — the **default +
-  workhorse** — renders photorealistic **Avatar IV/V photo avatars** (`/v3/videos`; the
-  avatar brings its own setting, sized via `aspect_ratio`+`resolution`). **`v3`**
-  (`/v3/video-agents`) auto-composes from a prompt (opt-in, unused). `iv` is premium-priced
-  (see Cost). _(The older `v2` studio-avatar + composited-background engine was removed.)_
+- **Engines** (per-row `engine`, else `defaults.engine = "v3"`): **`v3`** — the
+  **default** — the HeyGen **Video Agent** (`/v3/video-agents`), auto-wrapped with a strict
+  talking-head prompt (`heygen/v3-prompt.ts`) so it renders a clean spokesperson, ~$2/min,
+  but **writes its own delivery** (not guaranteed verbatim). **`iv`** — Avatar IV/V photo
+  avatars (`/v3/videos`, ~$3/min) with a **guaranteed-verbatim** script; set per-row for
+  exact copy. Both render the same `pools.iv` looks. _(The older `v2` studio-avatar +
+  composited-background engine was removed.)_
 - **The engine** is idempotent and resumable: a stable `job_id` and a `node:sqlite`
   ledger mean a crash never double-charges (it re-polls an existing HeyGen video id
   instead of re-creating). Capped concurrency, backoff polling, retries, and a
@@ -138,14 +142,15 @@ makes only one video; the run reports a "duplicate id" for the rest.
 | `target_audience` | — | |
 | `tone` | — | `energetic`(default)`/professional/friendly/luxury/playful` |
 | `language` | — | default `en` |
-| `engine` | — | `iv`(default — Avatar IV/V photo avatars)`/v3` — per-row override |
+| `engine` | — | `v3`(default — Video Agent, talking head)`/iv`(Avatar IV/V, verbatim) — per-row override |
+| `avatar_engine` | — | `iv`-engine tier: `avatar_iv`/`avatar_v` (else `defaults.avatarEngine`) |
 | `gender` | — | `male`/`female` (also `M`/`F`). Picks a matching avatar **and** voice from the gender pool. Default configurable. |
 | `avatar_id` | — | per-row override (else gendered pool rotation) |
 | `voice_id` | — | per-row override (else pool rotation) |
 | `orientation` | — | `portrait/landscape/square` |
 | `num_variations` | — | 1–5 (default 1) — distinct *generated* scripts per product (ignored when `script` is provided) |
 | `skip` | — | `true` to exclude a row without deleting it |
-| `row_id` | — | Stable **unique** id per row (else derived from `product_name`+`description`). **Required when rows share a `product_name`**, or they collapse to one job ("duplicate id"). |
+| `row_id` | — | Stable id per row (else a content hash of name+description+script+gender+render fields). Rows differing by script/gender/etc. stay distinct automatically; only byte-identical rows collapse ("duplicate id") — give one a `row_id` to keep both. |
 
 ---
 
@@ -155,12 +160,11 @@ Editable knobs (secrets stay in `.env`). Per-row CSV values override these.
 
 | Key | Purpose |
 |---|---|
-| `models.script` / `models.qaScript` | Claude model(s) for scripts (default `claude-haiku-4-5`) |
+| `models.script` | Claude model for scripts (default `claude-haiku-4-5`) |
 | `scriptWordBudget` | `{ target: 130, max: 140 }` — the <60s guarantee |
 | `sampleSize` | default `--sample` size |
-| `defaults` | `{ engine, orientation, numVariations }` |
-| `pools.iv` | `{ avatars, voices }` photo-avatar look ids + matched default voices (gender-split, **parallel** arrays — `avatars[g][i]` ↔ `voices[g][i]`) for the default `iv` engine |
-| `pools.v3` | `{ avatars, voices }` for the opt-in `v3` video-agents engine (usually empty — the agent auto-selects) |
+| `defaults` | `{ engine, orientation, gender, avatarEngine, resolution }` |
+| `pools.iv` | `{ avatars, voices }` photo-avatar look ids + matched default voices (gender-split, **parallel** arrays — `avatars[g][i]` ↔ `voices[g][i]`). Shared by **both** engines (v3 + iv). |
 | `defaults.avatarEngine` / `defaults.resolution` | `iv` tier (`avatar_v`/`avatar_iv`) + output (`1080p`/`720p`/`4k`) |
 | `defaults.gender` | `male`/`female` used when a row omits `gender` |
 | `rotation` | `"hash"` (implemented) or `"round-robin"` (planned — for unique-per-product at M9) |
