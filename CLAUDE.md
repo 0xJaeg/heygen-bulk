@@ -16,16 +16,20 @@ ingest → script-gen (cached) → HeyGen **Avatar IV/V** engine → `node:sqlit
 CLI (`dry-run`/`sample`/`approve`/`production`/`resume`) + `index.html` review page.
 Validated end-to-end with audio on Avatar V.
 
-**Default = Avatar IV/V photo avatars (`iv` engine).** The team chose Avatar V for its
-realism. Photo avatars bring their **own setting baked in**, so there are **no custom
-backgrounds** to manage (the old v2 studio-avatar + composited-background path, its
-framing knobs, and the `backgrounds/` folder were all removed — git history has them if
-ever needed). The only other engine is the opt-in `v3` video-agents (auto-compose,
-unused). **Presenter assignment is round-robin** (`config.rotation: "round-robin"`, the
-default): each video in a run gets the next avatar/voice in its gender pool, so
-same-gender videos don't repeat a presenter until the pool is exhausted (the per-gender
-counter lives in `runPipeline`; `buildJobSpec` takes the `rotationIndex`). Remaining:
-vet/expand `pools.iv` so larger same-gender batches stay varied.
+**Default = `v3` (HeyGen Video Agent), "v3-strict" talking head.** The team compared
+avatar_iv vs avatar_v (Avatar IV/V, the `iv` engine) vs the Video Agent and chose the
+Video Agent constrained to a clean spokesperson: the engine **auto-wraps every v3 script
+in a strict talking-head directive** (`heygen/v3-prompt.ts`) so it renders one continuous
+shot — no b-roll/captions/scene-cuts (a vague prompt makes it auto-compose). Quality reads
+on par with avatar_v at **~$2/min vs ~$3/min**. ⚠️ The agent *writes* its delivery, so
+verbatim wording isn't guaranteed — set a row's `engine` to `iv` for an Avatar IV/V render
+with an exact script. (The old v2 studio-avatar + composited-background path was removed —
+git history has it.) **Presenter assignment is round-robin** (`config.rotation:
+"round-robin"`, default): each video gets the next avatar/voice in its gender pool
+(per-gender counter in `runPipeline`; `buildJobSpec` takes `rotationIndex`). Both engines
+share one **photo-avatar pool** (`pools.iv`, ~15 female / 12 male public-stock looks vetted
+via preview; `pools.v3` is unused). Remaining: confirm v3 verbatim fidelity; the team can
+add their own uploaded looks by id.
 
 ## Working Style
 
@@ -77,14 +81,17 @@ engine (create/poll/download) → manifest + ledger**. Modules under `src/`:
 - `ingest/` — `loadRows`: local CSV or published-Sheet CSV URL → `csv-parse` → per-row validate.
 - `schema/row.ts` — `ProductRowSchema` (zod) + forgiving header mapping; empty cells → defaults. Optional `script` column (aliases VO/Voiceover/VSL): if set it's the spoken text used verbatim (Claude skipped) and `description`/`call_to_action` become optional (zod refine requires them only when no script). Optional `gender` (`male`/`female`, also `M`/`F`) selects a matching avatar+voice from the gender-split pool. Optional `avatar_engine` (`avatar_iv`/`avatar_v`) overrides `defaults.avatarEngine` per row (folded into the job id only when set, so existing sheets keep their ids) — used by `data/model-comparison.csv` to render the same script under both tiers side-by-side.
 - `script/` — `generate` (Claude `messages.parse` + `zodOutputFormat`), `prompt` (cached system block + `PROMPT_VERSION`), `word-budget` (enforce <60s), `cache` (content-hash → reuse, drift-proof).
-- `heygen/` — `client` (typed REST: `createIvVideo` → `/v3/videos`, `getStatusV3` → `/v3/videos/{id}` shared by both engines, V3 video-agents create/session, list avatars/voices/templates), `errors` (classify 429/credit/transient/permanent), `engine` (`processJob`/`runJobs`: concurrency cap, backoff polling, retries, credit circuit-breaker, download-on-complete), `download` (stream MP4 to disk).
+- `heygen/` — `client` (typed REST: `createIvVideo` → `/v3/videos`, `getStatusV3` → `/v3/videos/{id}` shared by both engines, V3 video-agents create/session, list avatars/voices/templates), `errors` (classify 429/credit/transient/permanent), `engine` (`processJob`/`runJobs`: concurrency cap, backoff polling, retries, credit circuit-breaker, download-on-complete; wraps v3 prompts via `v3-prompt`), `v3-prompt` (`talkingHeadPrompt` — the strict no-b-roll directive for the Video Agent), `download` (stream MP4 to disk).
 - `jobs/build-job.ts` — stable `job_id`, **gender-aware** pool rotation (avatars/voices split male/female so a row's `gender` picks a matching pair), `buildJobSpec` (override → pool rotation → default). Rotation is round-robin (caller passes `rotationIndex`) or seeded-by-hash when no index is given.
 - `store/job-store.ts` — `node:sqlite` ledger (idempotency + resume + cost).
 - `cost/estimate.ts`, `ledger/manifest.ts` (manifest.json + index.html), `orchestrate/` (`run` pipeline + approval `gate`).
 
-Two engines (per-row `engine`, else `defaults.engine`): **iv** — the **default + workhorse**
-— Avatar IV/V photorealistic **photo avatars** via `POST /v3/videos`; **v3** — opt-in
-auto-compose video-agents (unused). (The old `v2` studio-avatar engine was removed.)
+Two engines (per-row `engine`, else `defaults.engine = "v3"`): **v3** — the **default** —
+HeyGen **Video Agent** (`POST /v3/video-agents`), auto-wrapped with the strict
+talking-head prompt (`heygen/v3-prompt.ts`) for a clean spokesperson, ~$2/min, but writes
+its own delivery (not guaranteed verbatim); **iv** — Avatar IV/V photorealistic **photo
+avatars** via `POST /v3/videos`, ~$3/min, **guaranteed-verbatim** script (use per-row for
+exact copy). Both render the same `pools.iv` looks. (The old `v2` studio-avatar engine was removed.)
 
 ## Conventions
 

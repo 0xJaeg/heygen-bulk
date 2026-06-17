@@ -190,11 +190,38 @@ describe("buildJobSpec", () => {
     if (!r.ok) expect(r.reason).toMatch(/avatar/i)
   })
 
-  it("allows a v3 job without any avatar or voice (agent auto-selects)", () => {
+  it("v3 uses the shared photo-avatar pool (same looks as iv)", () => {
     const row: ProductRow = { ...baseRow, engine: "v3" }
     const r = buildJobSpec({ row, script, variationIndex: 0, config: makeConfig() })
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.spec.engine).toBe("v3")
+    if (r.ok) {
+      expect(r.spec.engine).toBe("v3")
+      expect(["iv_f1", "iv_f2"]).toContain(r.spec.avatarId)
+    }
+  })
+
+  it("allows a v3 job with an empty pool (agent auto-selects)", () => {
+    const config = makeConfig({
+      pools: {
+        v3: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
+        iv: { avatars: { female: [], male: [] }, voices: { female: [], male: [] } },
+      },
+    })
+    const row: ProductRow = { ...baseRow, engine: "v3" }
+    const r = buildJobSpec({ row, script, variationIndex: 0, config })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.spec.avatarId).toBeUndefined()
+  })
+
+  it("round-robin applies to v3 too (paired avatar+voice by index)", () => {
+    const config = makeConfig({ rotation: "round-robin" })
+    const row: ProductRow = { ...baseRow, engine: "v3" }
+    const r0 = buildJobSpec({ row, script, variationIndex: 0, config, rotationIndex: 0 })
+    const r1 = buildJobSpec({ row, script, variationIndex: 0, config, rotationIndex: 1 })
+    expect(r0.ok && r0.spec.avatarId).toBe("iv_f1")
+    expect(r0.ok && r0.spec.voiceId).toBe("ivv_f1")
+    expect(r1.ok && r1.spec.avatarId).toBe("iv_f2")
+    expect(r1.ok && r1.spec.voiceId).toBe("ivv_f2")
   })
 
   it("round-robin: picks the paired avatar+voice at rotationIndex, wrapping the pool", () => {

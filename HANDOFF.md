@@ -74,7 +74,7 @@ make sure the scripts and the count look right before you type `y`.
 ---
 
 ## Costs (no surprises)
-- About **$2–$4 per video** (Avatar V is ~$4 per minute, and clips are under a minute).
+- About **$1–$2 per video** (the default Video Agent is ~$2 per minute, and clips are under a minute).
 - `npm start` **always shows the total and asks first** — nothing is charged until you type `y`.
 
 ## If something goes wrong

@@ -49,6 +49,13 @@ function reportIngest(valid: number, errors: RowError[], skipped: number): void 
   }
 }
 
+/** Human label for the default render engine (per-row overrides aside). */
+function engineLabel(): string {
+  return config.defaults.engine === "v3"
+    ? "Video Agent · talking head"
+    : `${config.defaults.avatarEngine} · ${config.defaults.resolution}`
+}
+
 /**
  * True (and prints an error) when rows need a *generated* script (no `script`
  * cell) but no ANTHROPIC_API_KEY is set. Provided-script rows need no key.
@@ -218,16 +225,11 @@ program
     console.log(`  HeyGen base URL:  ${env.HEYGEN_BASE_URL}`)
     console.log(`  Max concurrency:  ${env.MAX_CONCURRENCY}`)
     console.log(`  Script model:     ${config.models.script}`)
-    console.log(
-      `  Engine:           ${config.defaults.engine}` +
-        (config.defaults.engine === "iv"
-          ? ` (${config.defaults.avatarEngine}, ${config.defaults.resolution})`
-          : "")
-    )
+    console.log(`  Engine:           ${config.defaults.engine} (${engineLabel()})`)
     const iv = config.pools.iv.avatars
     const vo = config.pools.iv.voices
-    console.log(`  IV avatars:       ${iv.female.length} female / ${iv.male.length} male`)
-    console.log(`  IV voices:        ${vo.female.length} female / ${vo.male.length} male`)
+    console.log(`  Pool avatars:     ${iv.female.length} female / ${iv.male.length} male`)
+    console.log(`  Pool voices:      ${vo.female.length} female / ${vo.male.length} male`)
   })
 
 program
@@ -357,7 +359,7 @@ program
     )
     const n = `${videos} video${videos === 1 ? "" : "s"}`
     console.log(
-      `\nReady to generate ${n} (${config.defaults.avatarEngine} · ${config.defaults.resolution}) — est. cost ≈ $${est.toFixed(2)}.`
+      `\nReady to generate ${n} (${engineLabel()}) — est. cost ≈ $${est.toFixed(2)}.`
     )
     console.log("Rendering runs on HeyGen and can take a few minutes per video — that's normal.")
     if (!opts.yes && !(await confirm(`\nGenerate ${n} for ~$${est.toFixed(2)}? (y/n) `))) {

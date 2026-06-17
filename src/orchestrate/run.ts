@@ -109,7 +109,11 @@ export async function runPipeline(
       // with an explicit avatar override keep their own and don't consume a slot).
       let rotationIndex: number | undefined
       const engine = row.engine ?? config.defaults.engine
-      if (config.rotation === "round-robin" && engine === "iv" && !row.avatar_id) {
+      if (
+        config.rotation === "round-robin" &&
+        (engine === "iv" || engine === "v3") &&
+        !row.avatar_id
+      ) {
         const g: Gender = row.gender ?? config.defaults.gender ?? "female"
         rotationIndex = rotationByGender.get(g) ?? 0
         rotationByGender.set(g, rotationIndex + 1)

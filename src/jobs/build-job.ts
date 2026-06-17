@@ -117,31 +117,26 @@ export function buildJobSpec(args: {
   const jobId = stableJobId(productId, variationIndex, engine)
 
   const isIv = engine === "iv"
-  const pool = isIv ? config.pools.iv : config.pools.v3
+  // Both engines render the same photo-avatar looks, so they share one pool.
+  const pool = config.pools.iv
   const gender: Gender = row.gender ?? config.defaults.gender ?? "female"
   const orientation: Orientation = row.orientation ?? config.defaults.orientation
   const avatarEngine = row.avatar_engine ?? config.defaults.avatarEngine
   const dims = DIMENSIONS[orientation]
 
-  // "iv" pairs avatar[i] with its matched voice[i] (parallel arrays); v3 picks
-  // avatar and voice independently (and tolerates an empty pool — the agent auto-selects).
-  let avatarId: string | undefined
-  let voiceId: string | undefined
-  if (isIv) {
-    const len = pool.avatars[gender].length
-    let i: number
-    if (config.rotation === "round-robin" && rotationIndex != null) {
-      i = len === 0 ? -1 : rotationIndex % len
-    } else {
-      i = seededIndex(len, `${jobId}:iv`)
-    }
-    avatarId = row.avatar_id ?? (i < 0 ? undefined : pool.avatars[gender][i])
-    voiceId = row.voice_id ?? (i < 0 ? undefined : pool.voices[gender][i])
+  // Paired selection: avatar[i] with its matched voice[i] (parallel arrays). Round-robin
+  // (caller-supplied index) gives distinct presenters per run, else seeded-by-hash.
+  const len = pool.avatars[gender].length
+  let i: number
+  if (config.rotation === "round-robin" && rotationIndex != null) {
+    i = len === 0 ? -1 : rotationIndex % len
   } else {
-    avatarId = row.avatar_id ?? pickFromPool(pool.avatars[gender], `${jobId}:avatar`)
-    voiceId = row.voice_id ?? pickFromPool(pool.voices[gender], `${jobId}:voice`)
+    i = seededIndex(len, `${jobId}:pool`)
   }
+  const avatarId = row.avatar_id ?? (i < 0 ? undefined : pool.avatars[gender][i])
+  const voiceId = row.voice_id ?? (i < 0 ? undefined : pool.voices[gender][i])
 
+  // iv requires an avatar+voice; v3 (Video Agent) tolerates an empty pool (auto-selects).
   if (isIv && (!avatarId || !voiceId)) {
     return {
       ok: false,
